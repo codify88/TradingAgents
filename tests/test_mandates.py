@@ -212,7 +212,7 @@ def test_mandate_survives_outcome_resolution(tmp_path):
     log.update_with_outcome(
         ticker="AAPL", trade_date="2026-01-05", raw_return=0.12, alpha_return=0.04,
         holding_days=EQUITY_VALUE.horizon_days, reflection="Held up.",
-        resolution_date="2028-01-05",
+        resolution_date="2028-01-05", mandate="equity_value",
     )
     entry = log.load_entries()[0]
     assert entry["pending"] is False
@@ -229,6 +229,7 @@ def test_batch_resolution_preserves_the_mandate(tmp_path):
         "ticker": "NVDA", "trade_date": "2026-01-05", "raw_return": -0.05,
         "alpha_return": -0.08, "holding_days": EQUITY_MOMENTUM.horizon_days,
         "reflection": "Trend broke.", "resolution_date": "2026-07-05",
+        "mandate": "equity_momentum",
     }])
     entry = log.load_entries()[0]
     assert entry["mandate"] == "equity_momentum"
@@ -316,3 +317,55 @@ def test_every_analyst_builds_a_string_system_message():
                 assert not isinstance(node.value, ast.Tuple), (
                     f"{path.name}: system_message is a tuple -- stray trailing comma"
                 )
+
+
+def test_same_ticker_and_date_under_two_mandates_are_two_entries(tmp_path):
+    """Found by running KO through both mandates on one date: the dedupe key was
+    (date, ticker), so the second run was silently swallowed. Two mandates are
+    two decisions -- different horizon, different framing, different outcome."""
+    log = _log(tmp_path)
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold", mandate="equity_value")
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold", mandate="equity_momentum")
+
+    entries = log.load_entries()
+    assert [e["mandate"] for e in entries] == ["equity_value", "equity_momentum"]
+
+    # Still idempotent within a mandate.
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold", mandate="equity_value")
+    assert len(log.load_entries()) == 2
+
+
+def test_each_mandates_entry_resolves_on_its_own_clock(tmp_path):
+    """The momentum call settles in months; the value call is still pending."""
+    log = _log(tmp_path)
+    for name in ("equity_value", "equity_momentum"):
+        log.store_decision("KO", "2026-09-17", "**Rating**: Hold", mandate=name)
+
+    log.batch_update_with_outcomes([{
+        "ticker": "KO", "trade_date": "2026-09-17", "mandate": "equity_momentum",
+        "raw_return": 0.03, "alpha_return": -0.01,
+        "holding_days": EQUITY_MOMENTUM.horizon_days,
+        "reflection": "Trend held, lagged the market.",
+        "resolution_date": "2027-03-19",
+    }])
+
+    by_mandate = {e["mandate"]: e for e in log.load_entries()}
+    assert by_mandate["equity_momentum"]["pending"] is False
+    assert by_mandate["equity_momentum"]["holding"] == f"{EQUITY_MOMENTUM.horizon_days}d"
+    assert by_mandate["equity_value"]["pending"] is True
+
+
+def test_resolution_targets_the_named_mandate_only(tmp_path):
+    """update_with_outcome must not settle whichever entry it happens to hit first."""
+    log = _log(tmp_path)
+    for name in ("equity_value", "equity_momentum"):
+        log.store_decision("KO", "2026-09-17", "**Rating**: Hold", mandate=name)
+
+    log.update_with_outcome(
+        ticker="KO", trade_date="2026-09-17", raw_return=0.03, alpha_return=-0.01,
+        holding_days=EQUITY_MOMENTUM.horizon_days, reflection="r",
+        resolution_date="2027-03-19", mandate="equity_momentum",
+    )
+    by_mandate = {e["mandate"]: e for e in log.load_entries()}
+    assert by_mandate["equity_value"]["pending"] is True
+    assert by_mandate["equity_momentum"]["pending"] is False

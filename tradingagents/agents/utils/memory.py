@@ -45,10 +45,13 @@ class TradingMemoryLog:
         # Idempotency guard: fast raw-text scan instead of full parse
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
+            prefix = f"[{trade_date} | {ticker} |"
             for line in raw.splitlines():
-                # "pending" is no longer necessarily the last field (the mandate
-                # tag follows it), so match on containment, not suffix.
-                if line.startswith(f"[{trade_date} | {ticker} |") and "| pending" in line:
+                match = self._match_pending_tag(line.strip(), prefix)
+                # Same ticker and date under a *different* mandate is a genuinely
+                # different decision -- different horizon, different framing --
+                # so it gets its own entry rather than being deduped away.
+                if match is not None and match[1] == mandate:
                     return
         rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending"
@@ -148,10 +151,12 @@ class TradingMemoryLog:
         holding_days: int,
         reflection: str,
         resolution_date: str | None = None,
+        mandate: str = "",
     ) -> None:
         """Replace pending tag and append REFLECTION section using atomic write.
 
-        Finds the first pending entry matching (trade_date, ticker), updates
+        Finds the first pending entry matching (trade_date, ticker, mandate),
+        updates
         its tag with return figures (and the ``resolution_date`` the outcome
         became known), and appends a REFLECTION section.  Uses a temp-file +
         os.replace() so a crash mid-write never corrupts the log.
@@ -178,8 +183,8 @@ class TradingMemoryLog:
             tag_line = lines[0].strip()
 
             match = None if updated else self._match_pending_tag(tag_line, pending_prefix)
-            if match is not None:
-                rating, mandate = match
+            if match is not None and match[1] == mandate:
+                rating, _ = match
                 new_tag = self._resolved_tag(
                     trade_date, ticker, rating, raw_pct, alpha_pct, holding_days,
                     resolution_date, mandate,
@@ -213,8 +218,11 @@ class TradingMemoryLog:
         text = self._log_path.read_text(encoding="utf-8")
         blocks = text.split(self._SEPARATOR)
 
-        # Build lookup keyed by (trade_date, ticker) for O(1) dispatch
-        update_map = {(u["trade_date"], u["ticker"]): u for u in updates}
+        # Keyed by (trade_date, ticker, mandate): the same ticker and date can
+        # carry one pending entry per mandate, each with its own horizon.
+        update_map = {
+            (u["trade_date"], u["ticker"], u.get("mandate", "")): u for u in updates
+        }
 
         new_blocks = []
         for block in blocks:
@@ -227,11 +235,11 @@ class TradingMemoryLog:
             tag_line = lines[0].strip()
 
             matched = False
-            for (trade_date, ticker), upd in list(update_map.items()):
+            for (trade_date, ticker, mandate), upd in list(update_map.items()):
                 pending_prefix = f"[{trade_date} | {ticker} |"
                 match = self._match_pending_tag(tag_line, pending_prefix)
-                if match is not None:
-                    rating, mandate = match
+                if match is not None and match[1] == mandate:
+                    rating, _ = match
                     raw_pct = f"{upd['raw_return']:+.1%}"
                     alpha_pct = f"{upd['alpha_return']:+.1%}"
                     new_tag = self._resolved_tag(
@@ -242,7 +250,7 @@ class TradingMemoryLog:
                     new_blocks.append(
                         f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{upd['reflection']}"
                     )
-                    del update_map[(trade_date, ticker)]
+                    del update_map[(trade_date, ticker, mandate)]
                     matched = True
                     break
 

@@ -412,6 +412,7 @@ class TradingAgentsGraph:
             updates.append({
                 "ticker": ticker,
                 "trade_date": entry["date"],
+                "mandate": entry.get("mandate", ""),
                 "raw_return": raw,
                 "alpha_return": alpha,
                 "holding_days": days,
