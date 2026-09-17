@@ -22,6 +22,8 @@ class Propagator:
         asset_type: str = "stock",
         past_context: str = "",
         instrument_context: str = "",
+        mandate: str = "",
+        mandate_context: str = "",
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -30,12 +32,19 @@ class Propagator:
         ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
         fall back to ticker-only context via
         ``get_instrument_context_from_state``.
+
+        ``mandate`` is the investment-style wire name (e.g. ``equity_value``)
+        and ``mandate_context`` its rendered prompt block, both resolved once
+        at run start. Empty strings mean "no mandate", which reproduces
+        upstream behaviour exactly.
         """
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,
             "asset_type": asset_type,
             "instrument_context": instrument_context,
+            "mandate": mandate,
+            "mandate_context": mandate_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
             "investment_debate_state": InvestDebateState(

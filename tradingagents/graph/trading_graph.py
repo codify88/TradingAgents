@@ -33,6 +33,7 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
+from tradingagents.mandates import get_mandate, render_mandate_context
 from tradingagents.reporting import write_report_tree
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
@@ -79,12 +80,21 @@ def _coerce_max_tokens(value):
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
+    # Declared at class level, not only assigned in __init__, so that callers
+    # which build a bare instance (``object.__new__``) or a ``MagicMock(spec=...)``
+    # still see them. The defaults are the "no mandate" case, which reproduces
+    # upstream behaviour exactly.
+    mandate_name: str = ""
+    mandate = None
+    mandate_context: str = ""
+
     def __init__(
         self,
         selected_analysts=("market", "social", "news", "fundamentals"),
         debug=False,
         config: dict[str, Any] = None,
         callbacks: list | None = None,
+        mandate: str = "",
     ):
         """Initialize the trading agents graph and components.
 
@@ -93,8 +103,16 @@ class TradingAgentsGraph:
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
+            mandate: Investment-mandate wire name (e.g. ``"equity_value"``). Sets the
+                evaluation horizon, benchmark, and the framing injected into every
+                agent prompt. Empty means no mandate, which reproduces upstream
+                behaviour exactly. An unknown name raises here, at startup, rather
+                than silently running the wrong style.
         """
         self.debug = debug
+        self.mandate_name = mandate or ""
+        self.mandate = get_mandate(self.mandate_name)
+        self.mandate_context = render_mandate_context(self.mandate)
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
 
@@ -263,6 +281,11 @@ class TradingAgentsGraph:
         explicit = self.config.get("benchmark_ticker")
         if explicit:
             return explicit
+        # A mandate may name its own benchmark (e.g. a momentum sleeve graded
+        # against MTUM). An explicit config value still wins, since that is the
+        # user deliberately overriding everything.
+        if self.mandate is not None and self.mandate.benchmark:
+            return self.mandate.benchmark
         benchmark_map = self.config.get("benchmark_map", {})
         ticker_upper = ticker.upper()
         for suffix, benchmark in benchmark_map.items():
@@ -270,11 +293,37 @@ class TradingAgentsGraph:
                 return benchmark
         return benchmark_map.get("", "SPY")
 
+    DEFAULT_HOLDING_DAYS = 5
+
+    def _holding_days_for(self, mandate_name: str = "") -> int:
+        """Trading days to grade a decision over.
+
+        Resolution order: the mandate the decision was *made* under (recorded on
+        its memory-log entry), then this graph's mandate, then upstream's 5-day
+        default. Grading a two-year value thesis on a five-day return is the
+        single most damaging default for long-horizon work -- it teaches the
+        memory log that patience is a mistake -- so the decision's own mandate
+        wins even when the current run uses a different one.
+        """
+        for name in (mandate_name, self.mandate_name):
+            if not name:
+                continue
+            try:
+                mandate = get_mandate(name)
+            except ValueError:
+                continue  # a log entry from a mandate this build no longer knows
+            if mandate is not None:
+                return mandate.horizon_days
+        return self.DEFAULT_HOLDING_DAYS
+
     def _fetch_returns(
-        self, ticker: str, trade_date: str, holding_days: int = 5,
+        self, ticker: str, trade_date: str, holding_days: int | None = None,
         benchmark: str = "SPY",
     ) -> tuple[float | None, float | None, int | None, str | None]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
+
+        ``holding_days`` defaults to the active mandate's horizon (see
+        :meth:`_holding_days_for`), falling back to upstream's 5 days.
 
         ``benchmark`` is the index used as the alpha baseline (resolved by the
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
@@ -286,6 +335,8 @@ class TradingAgentsGraph:
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
 
+        if holding_days is None:
+            holding_days = self._holding_days_for()
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
@@ -342,6 +393,7 @@ class TradingAgentsGraph:
         for entry in pending:
             raw, alpha, days, resolution_date = self._fetch_returns(
                 ticker, entry["date"], benchmark=benchmark,
+                holding_days=self._holding_days_for(entry.get("mandate", "")),
             )
             if raw is None:
                 continue  # price not available yet — try again next run
@@ -399,6 +451,7 @@ class TradingAgentsGraph:
             f"debate={self.config['max_debate_rounds']}",
             f"risk={self.config['max_risk_discuss_rounds']}",
             f"asset={asset_type}",
+            f"mandate={self.mandate_name}",
         ])
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):
@@ -523,6 +576,8 @@ class TradingAgentsGraph:
             asset_type=asset_type,
             past_context=past_context,
             instrument_context=instrument_context,
+            mandate=self.mandate_name,
+            mandate_context=self.mandate_context,
         )
         args = self.propagator.get_graph_args()
 
@@ -566,6 +621,7 @@ class TradingAgentsGraph:
             ticker=company_name,
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
+            mandate=self.mandate_name,
         )
 
         # Clear checkpoint on successful completion to avoid stale state.

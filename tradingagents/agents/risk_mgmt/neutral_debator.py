@@ -1,6 +1,7 @@
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    mandate_section,
     opponent_argument_or_opening,
 )
 
@@ -23,6 +24,7 @@ def create_neutral_debator(llm):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
         instrument_context = get_instrument_context_from_state(state)
+        mandate_context = mandate_section(state)
 
         trader_decision = state["trader_investment_plan"]
 
@@ -32,7 +34,7 @@ def create_neutral_debator(llm):
 
 Your task is to challenge both the Aggressive and Conservative Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
 
-{instrument_context}
+{mandate_context}{instrument_context}
 Market Research Report: {market_research_report}
 Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}

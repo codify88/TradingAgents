@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    apply_mandate_to_system_message,
     get_global_news,
     get_instrument_context_from_state,
     get_language_instruction,
@@ -48,7 +49,9 @@ def create_news_analyst(llm):
             ]
         )
 
-        prompt = prompt.partial(system_message=system_message)
+        prompt = prompt.partial(
+            system_message=apply_mandate_to_system_message(state, "news", system_message)
+        )
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)

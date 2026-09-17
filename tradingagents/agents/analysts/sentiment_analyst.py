@@ -31,6 +31,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.schemas import SentimentReport, render_sentiment_report
 from tradingagents.agents.utils.agent_utils import (
+    apply_mandate_to_system_message,
     get_instrument_context_from_state,
     get_language_instruction,
     get_news,
@@ -102,7 +103,9 @@ def create_sentiment_analyst(llm):
             ]
         )
 
-        prompt = prompt.partial(system_message=system_message)
+        prompt = prompt.partial(
+            system_message=apply_mandate_to_system_message(state, "social", system_message)
+        )
         prompt = prompt.partial(current_date=end_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 

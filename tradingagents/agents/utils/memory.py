@@ -32,18 +32,29 @@ class TradingMemoryLog:
         ticker: str,
         trade_date: str,
         final_trade_decision: str,
+        mandate: str = "",
     ) -> None:
-        """Append pending entry at end of propagate(). No LLM call."""
+        """Append pending entry at end of propagate(). No LLM call.
+
+        ``mandate`` is recorded on the tag so the deferred outcome resolution
+        grades this decision on the horizon it was actually made for, even if
+        the next run of the same ticker uses a different mandate.
+        """
         if not self._log_path:
             return
         # Idempotency guard: fast raw-text scan instead of full parse
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
             for line in raw.splitlines():
-                if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
+                # "pending" is no longer necessarily the last field (the mandate
+                # tag follows it), so match on containment, not suffix.
+                if line.startswith(f"[{trade_date} | {ticker} |") and "| pending" in line:
                     return
         rating = parse_rating(final_trade_decision)
-        tag = f"[{trade_date} | {ticker} | {rating} | pending]"
+        tag = f"[{trade_date} | {ticker} | {rating} | pending"
+        if mandate:
+            tag += f" | mandate:{mandate}"
+        tag += "]"
         entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
@@ -106,6 +117,26 @@ class TradingMemoryLog:
             parts.extend(self._format_reflection_only(e) for e in cross)
         return "\n\n".join(parts)
 
+    @staticmethod
+    def _match_pending_tag(tag_line: str, prefix: str) -> tuple[str, str] | None:
+        """Return ``(rating, mandate)`` for a matching pending tag, else None.
+
+        ``pending`` sits at field index 3 but is no longer necessarily the last
+        field -- a ``mandate:`` marker may follow it -- so this matches on the
+        parsed fields rather than on the line's suffix. The mandate is returned
+        so it survives onto the resolved tag.
+        """
+        if not (tag_line.startswith(prefix) and tag_line.endswith("]")):
+            return None
+        fields = [f.strip() for f in tag_line[1:-1].split("|")]
+        if len(fields) < 4 or fields[3] != "pending":
+            return None
+        mandate = next(
+            (f.split(":", 1)[1].strip() for f in fields[4:] if f.startswith("mandate:")),
+            "",
+        )
+        return fields[2], mandate
+
     # --- Update path (Phase B) ---
 
     def update_with_outcome(
@@ -146,16 +177,12 @@ class TradingMemoryLog:
             lines = stripped.splitlines()
             tag_line = lines[0].strip()
 
-            if (
-                not updated
-                and tag_line.startswith(pending_prefix)
-                and tag_line.endswith("| pending]")
-            ):
-                # Parse rating from the existing pending tag
-                fields = [f.strip() for f in tag_line[1:-1].split("|")]
-                rating = fields[2]
+            match = None if updated else self._match_pending_tag(tag_line, pending_prefix)
+            if match is not None:
+                rating, mandate = match
                 new_tag = self._resolved_tag(
-                    trade_date, ticker, rating, raw_pct, alpha_pct, holding_days, resolution_date
+                    trade_date, ticker, rating, raw_pct, alpha_pct, holding_days,
+                    resolution_date, mandate,
                 )
                 rest = "\n".join(lines[1:])
                 new_blocks.append(
@@ -202,14 +229,14 @@ class TradingMemoryLog:
             matched = False
             for (trade_date, ticker), upd in list(update_map.items()):
                 pending_prefix = f"[{trade_date} | {ticker} |"
-                if tag_line.startswith(pending_prefix) and tag_line.endswith("| pending]"):
-                    fields = [f.strip() for f in tag_line[1:-1].split("|")]
-                    rating = fields[2]
+                match = self._match_pending_tag(tag_line, pending_prefix)
+                if match is not None:
+                    rating, mandate = match
                     raw_pct = f"{upd['raw_return']:+.1%}"
                     alpha_pct = f"{upd['alpha_return']:+.1%}"
                     new_tag = self._resolved_tag(
                         trade_date, ticker, rating, raw_pct, alpha_pct,
-                        upd["holding_days"], upd.get("resolution_date"),
+                        upd["holding_days"], upd.get("resolution_date"), mandate,
                     )
                     rest = "\n".join(lines[1:])
                     new_blocks.append(
@@ -232,7 +259,8 @@ class TradingMemoryLog:
 
     @staticmethod
     def _resolved_tag(
-        trade_date, ticker, rating, raw_pct, alpha_pct, holding_days, resolution_date
+        trade_date, ticker, rating, raw_pct, alpha_pct, holding_days,
+        resolution_date, mandate="",
     ) -> str:
         """Build a resolved entry tag, recording the outcome's known-by date.
 
@@ -243,6 +271,8 @@ class TradingMemoryLog:
         tag = f"[{trade_date} | {ticker} | {rating} | {raw_pct} | {alpha_pct} | {holding_days}d"
         if resolution_date:
             tag += f" | resolved:{resolution_date}"
+        if mandate:
+            tag += f" | mandate:{mandate}"
         return tag + "]"
 
     def _apply_rotation(self, blocks: list[str]) -> list[str]:
@@ -292,21 +322,29 @@ class TradingMemoryLog:
         fields = [f.strip() for f in tag_line[1:-1].split("|")]
         if len(fields) < 4:
             return None
-        # Optional trailing "resolved:YYYY-MM-DD" field records when the outcome
-        # became known, for point-in-time filtering (#1251).
-        resolved = None
-        for f in fields[6:]:
-            if f.startswith("resolved:"):
-                resolved = f[len("resolved:"):].strip()
+        # Fields past the rating split into positional values (alpha, holding)
+        # and "key:value" markers. "resolved:" records when the outcome became
+        # known, for point-in-time filtering (#1251); "mandate:" records which
+        # investment style the call was made under, so the deferred resolution
+        # grades it on that mandate's horizon. Both are optional, so entries
+        # written by earlier versions keep parsing unchanged.
+        tagged, positional = {}, []
+        for f in fields[4:]:
+            key = f.split(":", 1)[0] if ":" in f else None
+            if key in ("resolved", "mandate"):
+                tagged[key] = f.split(":", 1)[1].strip()
+            else:
+                positional.append(f)
         entry = {
             "date": fields[0],
             "ticker": fields[1],
             "rating": fields[2],
             "pending": fields[3] == "pending",
             "raw": fields[3] if fields[3] != "pending" else None,
-            "alpha": fields[4] if len(fields) > 4 else None,
-            "holding": fields[5] if len(fields) > 5 else None,
-            "resolved": resolved,
+            "alpha": positional[0] if positional else None,
+            "holding": positional[1] if len(positional) > 1 else None,
+            "resolved": tagged.get("resolved"),
+            "mandate": tagged.get("mandate", ""),
         }
         body = "\n".join(lines[1:]).strip()
         decision_match = self._DECISION_RE.search(body)

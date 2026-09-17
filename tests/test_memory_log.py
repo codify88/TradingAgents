@@ -112,6 +112,21 @@ def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None
 # Core: storage and read path
 # ---------------------------------------------------------------------------
 
+def _graph_mock():
+    """A spec'd TradingAgentsGraph with the no-mandate path explicitly declared.
+
+    ``MagicMock(spec=...)`` constrains which attributes exist but not their
+    values, so every attribute reads back as a truthy mock. The mandate hooks
+    (``_resolve_benchmark`` consults ``mandate.benchmark``; ``_fetch_returns``
+    defaults its window from ``_holding_days_for``) therefore have to be pinned
+    to their unmandated defaults for these tests to exercise upstream behaviour.
+    """
+    g = MagicMock(spec=TradingAgentsGraph)
+    g.mandate = None
+    g.mandate_name = ""
+    g._holding_days_for.return_value = TradingAgentsGraph.DEFAULT_HOLDING_DAYS
+    return g
+
 class TestTradingMemoryLogCore:
 
     def test_store_creates_file(self, tmp_path):
@@ -494,7 +509,7 @@ class TestDeferredReflection:
     def test_fetch_returns_valid_ticker(self):
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         with patch("yfinance.Ticker") as mock_ticker_cls:
             def _make_ticker(sym):
                 m = MagicMock()
@@ -510,7 +525,7 @@ class TestDeferredReflection:
 
     def test_fetch_returns_too_recent(self):
         """Only 1 data point available → returns all-None, no crash."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         with patch("yfinance.Ticker") as mock_ticker_cls:
             m = MagicMock()
             m.history.return_value = _price_df([100.0])
@@ -520,7 +535,7 @@ class TestDeferredReflection:
 
     def test_fetch_returns_delisted(self):
         """Empty DataFrame → returns all-None, no crash."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         with patch("yfinance.Ticker") as mock_ticker_cls:
             m = MagicMock()
             m.history.return_value = pd.DataFrame({"Close": []})
@@ -533,7 +548,7 @@ class TestDeferredReflection:
         not raise IndexError."""
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0, 107.0, 108.0]  # 8 rows
         spy_prices   = [400.0, 402.0, 403.0, 405.0, 406.0, 407.0]                # 6 rows
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         with patch("yfinance.Ticker") as mock_ticker_cls:
             def _make_ticker(sym):
                 m = MagicMock()
@@ -551,7 +566,7 @@ class TestDeferredReflection:
         on a premature partial return."""
         stock_prices = [100.0, 102.0, 104.0]  # only 3 rows; holding window is 5
         spy_prices   = [400.0, 402.0, 404.0]
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         with patch("yfinance.Ticker") as mock_ticker_cls:
             def _make_ticker(sym):
                 m = MagicMock()
@@ -565,7 +580,7 @@ class TestDeferredReflection:
 
     def test_resolve_benchmark_explicit_override(self):
         """config['benchmark_ticker'] wins for every ticker."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.config = {
             "benchmark_ticker": "QQQ",
             "benchmark_map": {"": "SPY", ".T": "^N225"},
@@ -575,7 +590,7 @@ class TestDeferredReflection:
 
     def test_resolve_benchmark_suffix_map(self):
         """Known suffixes route to their regional index."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.config = {
             "benchmark_ticker": None,
             "benchmark_map": {
@@ -593,7 +608,7 @@ class TestDeferredReflection:
         """A-share tickers route to their exchange composite (uses the real
         default benchmark_map, since A-share support relies on it)."""
         from tradingagents.default_config import DEFAULT_CONFIG
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.config = {"benchmark_ticker": None,
                              "benchmark_map": DEFAULT_CONFIG["benchmark_map"]}
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "600519.SS") == "000001.SS"
@@ -601,7 +616,7 @@ class TestDeferredReflection:
 
     def test_resolve_benchmark_us_ticker_defaults_to_spy(self):
         """US tickers (no dotted suffix) take the empty-suffix entry."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.config = {
             "benchmark_ticker": None,
             "benchmark_map": {"": "SPY", ".T": "^N225"},
@@ -611,7 +626,7 @@ class TestDeferredReflection:
 
     def test_resolve_benchmark_unknown_suffix_falls_back(self):
         """Unrecognised suffix (BRK.B, FAKE.XX) falls back to SPY."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.config = {
             "benchmark_ticker": None,
             "benchmark_map": {"": "SPY", ".T": "^N225"},
@@ -621,7 +636,7 @@ class TestDeferredReflection:
 
     def test_resolve_benchmark_case_insensitive(self):
         """Suffix matching is case-insensitive so 7203.t resolves like 7203.T."""
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.config = {
             "benchmark_ticker": None,
             "benchmark_map": {".T": "^N225", "": "SPY"},
@@ -664,7 +679,7 @@ class TestDeferredReflection:
         """Pending AAPL entry is not resolved when the run is for NVDA."""
         log = make_log(tmp_path)
         log.store_decision("AAPL", "2026-01-10", DECISION_BUY)
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.memory_log = log
         mock_graph._fetch_returns = MagicMock(return_value=(0.05, 0.02, 5, "2026-01-12"))
         TradingAgentsGraph._resolve_pending_entries(mock_graph, "NVDA")
@@ -677,7 +692,7 @@ class TestDeferredReflection:
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         mock_reflector = MagicMock()
         mock_reflector.reflect_on_final_decision.return_value = "Momentum confirmed."
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.memory_log = log
         mock_graph.reflector = mock_reflector
         mock_graph._fetch_returns = MagicMock(return_value=(0.05, 0.02, 5, "2026-01-12"))
@@ -696,7 +711,7 @@ class TestDeferredReflection:
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         mock_reflector = MagicMock()
-        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph = _graph_mock()
         mock_graph.memory_log = log
         mock_graph.reflector = mock_reflector
         mock_graph._fetch_returns = MagicMock(return_value=(None, None, None, None))

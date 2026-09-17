@@ -201,6 +201,77 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     )
 
 
+def get_mandate_context_from_state(state: Mapping[str, Any]) -> str:
+    """Return the mandate prompt block for the current run, or ''.
+
+    Resolved once at run start (see ``TradingAgentsGraph._resolve_mandate``)
+    and stored on the state. Falls back to re-rendering from the stored wire
+    name, and finally to '' -- a state built without a mandate (bare
+    programmatic calls, upstream tests) must read exactly as it does upstream,
+    so callers can interpolate the result unconditionally.
+    """
+    context = state.get("mandate_context")
+    if isinstance(context, str) and context.strip():
+        return context
+
+    from tradingagents.mandates import get_mandate, render_mandate_context
+
+    name = state.get("mandate")
+    if not isinstance(name, str) or not name:
+        return ""
+    try:
+        return render_mandate_context(get_mandate(name))
+    except ValueError:
+        # An unknown name is caught loudly at run start; mid-graph, degrade to
+        # upstream behaviour rather than killing an in-flight run.
+        return ""
+
+
+def mandate_section(state: Mapping[str, Any]) -> str:
+    """The mandate block as a prompt section, blank-padded, or ''.
+
+    Lets an agent write ``{mandate_section}`` inline without leaving a stray
+    blank line when no mandate is set.
+    """
+    context = get_mandate_context_from_state(state)
+    return f"{context}\n\n" if context else ""
+
+
+def apply_mandate_to_system_message(
+    state: Mapping[str, Any], analyst_key: str, system_message: str
+) -> str:
+    """Frame an analyst's upstream system message with the run's mandate.
+
+    The mandate block goes first, so it frames everything that follows, and the
+    mandate's analyst-specific guidance goes last, where it takes precedence
+    over the generic upstream instructions it narrows. ``system_message`` is
+    returned untouched when no mandate is set, so an unmandated run is
+    byte-identical to upstream.
+
+    Wrapping the message this way -- rather than editing each analyst's prompt
+    template -- keeps upstream prompt changes merging cleanly.
+    """
+    context = get_mandate_context_from_state(state)
+    if not context:
+        return system_message
+
+    parts = [context, system_message]
+
+    from tradingagents.mandates import get_mandate
+
+    try:
+        mandate = get_mandate(state.get("mandate"))
+    except ValueError:
+        mandate = None
+    guidance = mandate.guidance_for(analyst_key) if mandate else ""
+    if guidance:
+        parts.append(
+            f"MANDATE-SPECIFIC GUIDANCE for this analysis. Where it narrows the "
+            f"general instructions above, follow it:\n{guidance}"
+        )
+    return "\n\n".join(parts)
+
+
 def create_msg_delete():
     def delete_messages(state):
         """Clear messages and add a context-anchored placeholder.
