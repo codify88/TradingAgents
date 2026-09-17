@@ -71,3 +71,23 @@ Prompts stay upstream's. The mandate is **injected**, never forked, so
 3. **Point-in-time discipline.** Upstream already gates memory lessons by
    resolution date (#1251). Longer horizons make look-ahead leakage easier, not
    harder - hold the line.
+
+## Status
+
+**P1 is landed.** `mandates/` ships `equity_value` and `equity_momentum`; the
+mandate reaches every analyst, both researchers, the research manager, the
+trader, all three risk debators, and the portfolio manager; the grading horizon
+and benchmark follow the mandate; the memory log records which mandate produced
+each decision; the CLI asks for one as step 2 and `TRADINGAGENTS_MANDATE` sets
+it for unattended runs. With no mandate selected every rendered prompt is
+byte-identical to upstream.
+
+**Known gap.** `review_horizons_days` is declared and validated but interim
+grading is not implemented yet: a pending entry is still settled once, at the
+primary horizon. For `equity_value` that means no reflection for two years,
+which is the next thing worth building (it needs a log schema that can hold
+several outcomes per entry). Until then a long-horizon mandate produces sound
+analysis but no learning signal.
+
+**Not yet started.** P2 (value analysis tools and analysts), P3 (momentum),
+P4 (screener).
