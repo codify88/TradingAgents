@@ -251,6 +251,18 @@ def apply_mandate_to_system_message(
     Wrapping the message this way -- rather than editing each analyst's prompt
     template -- keeps upstream prompt changes merging cleanly.
     """
+    if not isinstance(system_message, str):
+        # A stray trailing comma in an analyst's prompt makes this a 1-tuple,
+        # which the template then renders as Python tuple syntax -- quotes,
+        # parens, escaped newlines -- straight into the model's system prompt.
+        # Upstream shipped exactly that in the fundamentals analyst. Say so
+        # here rather than failing with a TypeError deep in a str join.
+        raise TypeError(
+            f"analyst {analyst_key!r} built a {type(system_message).__name__} "
+            f"system message, not a str -- check for a trailing comma in its "
+            f"prompt assignment"
+        )
+
     context = get_mandate_context_from_state(state)
     if not context:
         return system_message

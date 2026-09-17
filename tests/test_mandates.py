@@ -291,3 +291,28 @@ def test_cli_picker_offers_every_registered_mandate_plus_none(monkeypatch):
     )
     assert u.select_mandate() == ""
     assert captured["values"] == [m.name for m in list_mandates()] + [""]
+
+
+def test_tuple_system_message_is_reported_clearly():
+    """Upstream's fundamentals analyst shipped a 1-tuple here (stray comma), which
+    the template rendered as Python tuple syntax into the model's prompt."""
+    from tradingagents.agents.utils.agent_utils import apply_mandate_to_system_message
+
+    with pytest.raises(TypeError, match="trailing comma"):
+        apply_mandate_to_system_message({}, "fundamentals", ("oops",))
+
+
+def test_every_analyst_builds_a_string_system_message():
+    """Guards the whole class of bug, not just the one instance."""
+    import ast
+    import pathlib
+
+    for path in sorted(pathlib.Path("tradingagents/agents/analysts").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Assign)
+                and getattr(node.targets[0], "id", "") == "system_message"
+            ):
+                assert not isinstance(node.value, ast.Tuple), (
+                    f"{path.name}: system_message is a tuple -- stray trailing comma"
+                )
