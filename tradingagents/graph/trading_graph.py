@@ -94,7 +94,7 @@ class TradingAgentsGraph:
         debug=False,
         config: dict[str, Any] = None,
         callbacks: list | None = None,
-        mandate: str = "",
+        mandate: str | None = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -105,16 +105,22 @@ class TradingAgentsGraph:
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
             mandate: Investment-mandate wire name (e.g. ``"equity_value"``). Sets the
                 evaluation horizon, benchmark, and the framing injected into every
-                agent prompt. Empty means no mandate, which reproduces upstream
-                behaviour exactly. An unknown name raises here, at startup, rather
-                than silently running the wrong style.
+                agent prompt. ``None`` falls back to ``config["mandate"]`` (settable
+                via ``TRADINGAGENTS_MANDATE``); an empty string means no mandate,
+                which reproduces upstream behaviour exactly. An unknown name raises
+                here, at startup, rather than silently running the wrong style.
         """
         self.debug = debug
-        self.mandate_name = mandate or ""
-        self.mandate = get_mandate(self.mandate_name)
-        self.mandate_context = render_mandate_context(self.mandate)
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+
+        # Resolve the mandate once config is available, so an explicit argument
+        # wins over the config/env default. An unknown name raises here.
+        self.mandate_name = (
+            mandate if mandate is not None else self.config.get("mandate", "")
+        ) or ""
+        self.mandate = get_mandate(self.mandate_name)
+        self.mandate_context = render_mandate_context(self.mandate)
 
         # Update the interface's config
         set_config(self.config)

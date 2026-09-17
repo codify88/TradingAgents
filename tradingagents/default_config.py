@@ -17,6 +17,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
+    "TRADINGAGENTS_MANDATE":              "mandate",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
     "TRADINGAGENTS_MAX_TOKENS":           "max_tokens",
@@ -78,6 +79,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # the oldest resolved entries are pruned once this limit is exceeded.
     # Pending entries are never pruned. None disables rotation entirely.
     "memory_log_max_entries": None,
+    # Investment mandate: sets the evaluation horizon, benchmark, and the
+    # framing injected into every agent prompt. "" means no mandate, which
+    # reproduces upstream's short-horizon behaviour. See
+    # tradingagents/mandates/ for the registered names.
+    "mandate": "",
     # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "gpt-5.6",

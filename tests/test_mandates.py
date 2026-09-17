@@ -247,3 +247,47 @@ def test_entries_written_before_mandates_still_parse(tmp_path):
     assert entry["mandate"] == ""
     assert (entry["raw"], entry["alpha"], entry["holding"]) == ("+2.0%", "+0.5%", "5d")
     assert entry["resolved"] == "2026-01-12"
+
+
+# --- config / CLI wiring --------------------------------------------------
+
+
+def test_graph_takes_the_mandate_from_config_when_not_passed():
+    """Unattended runs configure the mandate via TRADINGAGENTS_MANDATE."""
+    g = object.__new__(TradingAgentsGraph)
+    g.config = {"mandate": "equity_momentum"}
+    mandate = None
+    resolved = (mandate if mandate is not None else g.config.get("mandate", "")) or ""
+    assert get_mandate(resolved) is EQUITY_MOMENTUM
+
+
+def test_config_exposes_a_mandate_key_defaulting_to_none():
+    from tradingagents.default_config import DEFAULT_CONFIG
+
+    assert DEFAULT_CONFIG["mandate"] == ""
+
+
+def test_mandate_env_var_is_registered_for_override():
+    from tradingagents.default_config import _ENV_OVERRIDES
+
+    assert _ENV_OVERRIDES["TRADINGAGENTS_MANDATE"] == "mandate"
+
+
+def test_cli_picker_offers_every_registered_mandate_plus_none(monkeypatch):
+    """The picker reads the registry, so it can't drift from what's registered."""
+    import cli.utils as u
+
+    captured = {}
+
+    class _Q:
+        def __init__(self, choices):
+            captured["values"] = [c.value for c in choices]
+
+        def ask(self):
+            return ""
+
+    monkeypatch.setattr(
+        u.questionary, "select", lambda *a, **kw: _Q(kw["choices"])
+    )
+    assert u.select_mandate() == ""
+    assert captured["values"] == [m.name for m in list_mandates()] + [""]

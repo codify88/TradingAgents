@@ -164,6 +164,48 @@ def select_analysts(asset_type: AssetType = AssetType.STOCK) -> list[AnalystType
     return choices
 
 
+def select_mandate() -> str:
+    """Select an investment mandate, returning its wire name ('' for none).
+
+    Choices come from the registry rather than a parallel enum, so adding a
+    mandate needs no CLI edit and the list can never drift.
+    """
+    from tradingagents.mandates import TRADING_DAYS_PER_YEAR, list_mandates
+
+    def horizon(mandate) -> str:
+        days = mandate.horizon_days
+        if days >= TRADING_DAYS_PER_YEAR:
+            return f"~{days / TRADING_DAYS_PER_YEAR:.0f}y horizon"
+        return f"~{round(days / 21)}mo horizon"
+
+    options = [
+        (f"{m.label} ({horizon(m)})", m.name) for m in list_mandates()
+    ]
+    options.append(("None - short-horizon trade (framework default)", ""))
+
+    choice = questionary.select(
+        "Select Your [Investment Mandate]:",
+        choices=[questionary.Choice(display, value=value) for display, value in options],
+        instruction=(
+            "\n- Sets the evaluation horizon, benchmark, and the framing every agent argues within"
+            "\n- Use arrow keys to navigate\n- Press Enter to select"
+        ),
+        style=questionary.Style(
+            [
+                ("selected", "fg:yellow noinherit"),
+                ("highlighted", "fg:yellow noinherit"),
+                ("pointer", "fg:yellow noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if choice is None:
+        console.print("\n[red]No mandate selected. Exiting...[/red]")
+        exit(1)
+
+    return choice
+
+
 def select_research_depth() -> int:
     """Select research depth using an interactive selection."""
 
