@@ -118,6 +118,7 @@ def test_initial_state_without_a_mandate_is_unchanged_from_upstream():
 
 def _graph(mandate_name=""):
     g = object.__new__(TradingAgentsGraph)
+    g.config = {}
     g.mandate_name = mandate_name
     g.mandate = get_mandate(mandate_name)
     return g
@@ -193,8 +194,10 @@ def test_run_signature_keys_on_the_mandates_own_analysts():
 
     assert sig("equity_value").endswith("|mandate_analysts=quality,valuation")
     # Mandates without analysts, and no mandate, keep their existing signature.
+    # (upstream v0.5.0 added the portfolio field ahead of ours.)
     assert sig("equity_momentum") == (
         "analysts=market|debate=1|risk=1|asset=stock|mandate=equity_momentum"
+        "|portfolio=none"
     )
     assert "mandate_analysts" not in sig("")
 

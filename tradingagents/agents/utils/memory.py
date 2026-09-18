@@ -52,16 +52,21 @@ class TradingMemoryLog:
         """
         if not self._log_path:
             return
-        # Idempotency guard: fast raw-text scan instead of full parse
+        # Idempotency guard: fast raw-text scan instead of full parse. Any entry
+        # for this ticker and date blocks another, pending or settled: a re-run
+        # after the outcome landed would otherwise count the same decision twice
+        # in past context and in every aggregate over the log.
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
             prefix = f"[{trade_date} | {ticker} |"
             for line in raw.splitlines():
-                match = self._match_pending_tag(line.strip(), prefix)
-                # Same ticker and date under a *different* mandate is a genuinely
-                # different decision -- different horizon, different framing --
-                # so it gets its own entry rather than being deduped away.
-                if match is not None and match[1] == mandate:
+                # Upstream blocks on any entry for this ticker and date, settled
+                # or pending, so a re-run after the outcome landed cannot count
+                # the same decision twice (#645). Scoped to the mandate here:
+                # the same ticker and date under a *different* mandate is a
+                # genuinely different decision -- different horizon, different
+                # framing -- and gets its own entry.
+                if self._tag_mandate(line.strip(), prefix) == mandate:
                     return
         rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending"
@@ -148,6 +153,24 @@ class TradingMemoryLog:
             parts.append("Recent cross-ticker lessons:")
             parts.extend(self._format_reflection_only(e) for e in cross)
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _tag_mandate(tag_line: str, prefix: str):
+        """The mandate on any entry tag matching ``prefix``, else ``None``.
+
+        Unlike :meth:`_match_pending_tag` this accepts settled entries too, for
+        the write-path idempotency guard. ``None`` means "not an entry for this
+        ticker and date", which no mandate string can collide with.
+        """
+        if not (tag_line.startswith(prefix) and tag_line.endswith("]")):
+            return None
+        fields = [f.strip() for f in tag_line[1:-1].split("|")]
+        if len(fields) < 4:
+            return None
+        return next(
+            (f.split(":", 1)[1].strip() for f in fields[4:] if f.startswith("mandate:")),
+            "",
+        )
 
     @staticmethod
     def _match_pending_tag(tag_line: str, prefix: str) -> tuple[str, str] | None:
