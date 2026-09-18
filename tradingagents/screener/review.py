@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 from tradingagents.agents.utils.memory import TradingMemoryLog
 
@@ -123,11 +124,18 @@ def _alpha(entry: dict) -> float:
         return float("nan")
 
 
-def _group(label: str, symbols: list[str], entries: list[dict], as_of: str) -> GroupOutcome:
+def _group(
+    label: str, symbols: list[str], entries: list[dict], as_of: str, mandate: str = "",
+) -> GroupOutcome:
     alphas, pending = [], 0
     for symbol in symbols:
+        # The mandate is part of the match: the same ticker and date analysed
+        # under another mandate (or none) is a different decision, graded over a
+        # different horizon, and says nothing about this screen.
         matches = [e for e in entries
-                   if e["ticker"] == symbol and e["date"] == as_of and not e.get("superseded")]
+                   if e["ticker"] == symbol and e["date"] == as_of
+                   and (e.get("mandate") or "") == (mandate or "")
+                   and not e.get("superseded")]
         if not matches:
             pending += 1
             continue
@@ -150,11 +158,30 @@ def _group(label: str, symbols: list[str], entries: list[dict], as_of: str) -> G
     )
 
 
-def score_manifest(manifest: ScreenManifest, log: TradingMemoryLog) -> tuple[GroupOutcome, GroupOutcome]:
-    entries = log.load_entries()
+def decision_logs(config: dict) -> list[TradingMemoryLog]:
+    """Every log a screened name's outcome can land in, oldest source first.
+
+    The live log holds names analysed interactively; each backtest sweep keeps
+    its own log under ``results_dir/backtest/<run_id>/`` so it cannot flood the
+    live one. The screen prints a backtest command for its shortlist, so the
+    review has to read those logs too -- otherwise running exactly what the
+    screen suggests would feed nothing back into this report. Sweeps are in
+    run-id (timestamp) order, so where a name was run more than once the most
+    recent sweep's outcome is the one scored.
+    """
+    logs = [TradingMemoryLog(config)]
+    sweeps = Path(config["results_dir"]) / "backtest"
+    if sweeps.is_dir():
+        logs += [TradingMemoryLog({"memory_log_path": str(path)})
+                 for path in sorted(sweeps.glob("*/trading_memory.md"))]
+    return logs
+
+
+def score_manifest(manifest: ScreenManifest, *logs: TradingMemoryLog) -> tuple[GroupOutcome, GroupOutcome]:
+    entries = [e for log in logs for e in log.load_entries()]
     return (
-        _group("picks", manifest.pick_symbols, entries, manifest.as_of),
-        _group("control", manifest.control_symbols, entries, manifest.as_of),
+        _group("picks", manifest.pick_symbols, entries, manifest.as_of, manifest.mandate),
+        _group("control", manifest.control_symbols, entries, manifest.as_of, manifest.mandate),
     )
 
 
@@ -164,7 +191,7 @@ def render_performance(config: dict, mandate: str | None = None) -> str:
     if not manifests:
         return "No screens have been run yet."
 
-    log = TradingMemoryLog(config)
+    logs = decision_logs(config)
     lines = [
         "# Screen performance",
         "",
@@ -181,7 +208,7 @@ def render_performance(config: dict, mandate: str | None = None) -> str:
     ]
     totals = {"picks": [], "control": []}
     for manifest in manifests:
-        picks, control = score_manifest(manifest, log)
+        picks, control = score_manifest(manifest, *logs)
         edge = (
             _pct(picks.mean_alpha - control.mean_alpha)
             if picks.measurable and control.measurable else "—"

@@ -474,3 +474,40 @@ class TestVendorFailureIsNotAFinding:
         screen.run_screen("equity_momentum", "2026-09-17", {"results_dir": "/tmp"},
                           picks=2, controls=1, requests_per_minute=100_000)
         assert calls == [], "no API budget is spent on a sample of the vendor's mood"
+
+
+class TestReviewReadsWhereOutcomesLand:
+    """screen -> backtest -> screen-review has to close as a loop."""
+
+    def test_a_decision_under_another_mandate_is_not_scored(self):
+        other = {**_entry("AAA", "+9.9%"), "mandate": "equity_value"}
+        unmandated = {**_entry("AAA", "+9.9%"), "mandate": ""}
+        picks, _ = score_manifest(_manifest(["AAA"], []), _Log([other, unmandated]))
+        assert picks.settled == 0 and picks.pending == 1
+
+    def test_entries_are_pooled_across_logs(self):
+        picks, control = score_manifest(
+            _manifest(["AAA"], ["BBB"]), _Log([_entry("AAA", "+5.0%")]), _Log([_entry("BBB", "-1.0%")]))
+        assert (picks.settled, control.settled) == (1, 1)
+
+    def test_the_latest_sweep_wins_when_a_name_ran_twice(self):
+        picks, _ = score_manifest(
+            _manifest(["AAA"], []), _Log([_entry("AAA", "+1.0%")]), _Log([_entry("AAA", "+3.0%")]))
+        assert picks.mean_alpha == pytest.approx(0.03)
+
+    def test_a_backtest_sweeps_outcomes_reach_the_review(self, tmp_path):
+        """Running exactly the command the screen prints must feed the report."""
+        from tradingagents.agents.utils.memory import TradingMemoryLog
+        from tradingagents.screener.review import decision_logs
+
+        config = {"results_dir": str(tmp_path), "memory_log_path": str(tmp_path / "live.md")}
+        mf.save_manifest(_manifest(["AAA"], ["BBB"]), config)
+        sweep = TradingMemoryLog({"memory_log_path": str(tmp_path / "backtest" / "20260918_1" / "trading_memory.md")})
+        for ticker, alpha in (("AAA", 0.05), ("BBB", -0.01)):
+            sweep.store_decision(ticker, "2026-09-17", "Rating: Buy", mandate="equity_momentum")
+            sweep.update_with_outcome(ticker, "2026-09-17", alpha, alpha, 126, "noted",
+                                      resolution_date="2027-03-19", mandate="equity_momentum")
+
+        assert len(decision_logs(config)) == 2
+        out = render_performance(config)
+        assert "| r1 | momentum | 2026-09-17 | 1/1 | +5.0% | 1/1 | -1.0% | +6.0% |" in out
