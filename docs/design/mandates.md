@@ -79,8 +79,12 @@ mandate reaches every analyst, both researchers, the research manager, the
 trader, all three risk debators, and the portfolio manager; the grading horizon
 and benchmark follow the mandate; the memory log records which mandate produced
 each decision; the CLI asks for one as step 2 and `TRADINGAGENTS_MANDATE` sets
-it for unattended runs. With no mandate selected every rendered prompt is
-byte-identical to upstream.
+it for unattended runs. The indicator shortlist narrows the market analyst's
+twelve-indicator menu to what the horizon can use (three for `equity_value`,
+eight for `equity_momentum`), and a shortlist naming an indicator the vendors
+don't implement fails at import. With no mandate selected every rendered prompt
+is byte-identical to upstream. **P1 is complete**; every `Mandate` field is now
+consumed.
 
 **Interim grading is landed.** A pending entry is now checkpointed at every
 `review_horizons_days` milestone that has come due, and settled once at the
@@ -119,5 +123,5 @@ settle (it requested 511 days for a window that spans ~730); and log rotation
 identified pending entries by the tag suffix `| pending]`, which the `mandate:`
 marker broke, making unresolved long-horizon work prunable.
 
-**Not yet started.** P2 (value analysis tools and analysts), P3 (momentum),
-P4 (screener).
+**In progress.** P2 (value analysis tools and analysts).
+**Not yet started.** P3 (momentum), P4 (screener).

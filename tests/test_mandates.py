@@ -369,3 +369,56 @@ def test_resolution_targets_the_named_mandate_only(tmp_path):
     by_mandate = {e["mandate"]: e for e in log.load_entries()}
     assert by_mandate["equity_value"]["pending"] is True
     assert by_mandate["equity_momentum"]["pending"] is False
+
+
+# --- indicator shortlist ----------------------------------------------------
+
+
+def test_market_analyst_is_told_the_mandates_indicator_shortlist():
+    guidance = EQUITY_VALUE.guidance_for("market")
+    assert "close_200_sma, close_50_sma, atr" in guidance
+    assert "do not call get_indicators for any other" in guidance
+    # The analyst-specific framing is kept, not replaced.
+    assert "Price action is secondary" in guidance
+
+
+def test_shortlist_reaches_only_the_market_analyst():
+    assert "Indicator selection" not in EQUITY_VALUE.guidance_for("fundamentals")
+    assert "Indicator selection" not in EQUITY_MOMENTUM.guidance_for("news")
+
+
+def test_shortlist_alone_still_produces_market_guidance():
+    m = Mandate(name="x", label="X", description="d", indicator_shortlist=("rsi",))
+    assert m.guidance_for("market").startswith("Indicator selection")
+
+
+def test_no_shortlist_leaves_market_guidance_unchanged():
+    m = Mandate(name="x", label="X", description="d",
+                analyst_guidance={"market": "Just this."})
+    assert m.guidance_for("market") == "Just this."
+
+
+def test_unknown_indicator_in_shortlist_is_rejected_at_construction():
+    with pytest.raises(ValueError, match="unknown indicator.*stochrsi"):
+        Mandate(name="x", label="X", description="d",
+                indicator_shortlist=("rsi", "stochrsi"))
+
+
+def test_known_indicator_set_matches_the_market_analysts_menu():
+    """Drift guard: the shortlist vocabulary is the menu upstream's prompt offers."""
+    import inspect
+    import re
+
+    from tradingagents.agents.analysts import market_analyst
+    from tradingagents.mandates.base import MARKET_ANALYST_INDICATORS
+
+    menu = set(re.findall(r"^- (\w+):", inspect.getsource(market_analyst), re.M))
+    assert menu == MARKET_ANALYST_INDICATORS
+
+
+def test_shortlist_reaches_the_rendered_market_prompt():
+    from tradingagents.agents.utils.agent_utils import apply_mandate_to_system_message
+
+    state = {"mandate": "equity_value", "mandate_context": render_mandate_context(EQUITY_VALUE)}
+    rendered = apply_mandate_to_system_message(state, "market", "UPSTREAM PROMPT")
+    assert rendered.index("UPSTREAM PROMPT") < rendered.index("Indicator selection")

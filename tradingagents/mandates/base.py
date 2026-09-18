@@ -16,6 +16,16 @@ from dataclasses import dataclass, field
 # Trading days, not calendar days: the reflection loop counts price bars.
 TRADING_DAYS_PER_YEAR = 252
 
+# The indicator menu the market analyst's prompt offers, which is also the set
+# both data vendors implement (yfinance additionally has ``mfi``; Alpha Vantage
+# does not, so it is left out). A shortlist naming anything else would send the
+# model to call an indicator that fails at the tool, so it is rejected here.
+MARKET_ANALYST_INDICATORS = frozenset({
+    "close_50_sma", "close_200_sma", "close_10_ema",
+    "macd", "macds", "macdh", "rsi",
+    "boll", "boll_ub", "boll_lb", "atr", "vwma",
+})
+
 
 @dataclass(frozen=True)
 class Mandate:
@@ -58,6 +68,12 @@ class Mandate:
             raise ValueError(
                 f"mandate {self.name!r}: review_horizons_days must be ascending"
             )
+        unknown = set(self.indicator_shortlist) - MARKET_ANALYST_INDICATORS
+        if unknown:
+            raise ValueError(
+                f"mandate {self.name!r}: unknown indicator(s) in "
+                f"indicator_shortlist: {', '.join(sorted(unknown))}"
+            )
 
     @property
     def all_horizons_days(self) -> tuple[int, ...]:
@@ -65,8 +81,24 @@ class Mandate:
         return (*self.review_horizons_days, self.horizon_days)
 
     def guidance_for(self, analyst_key: str) -> str:
-        """Extra system text for one analyst, or '' when the mandate is silent."""
-        return self.analyst_guidance.get(analyst_key, "")
+        """Extra system text for one analyst, or '' when the mandate is silent.
+
+        The market analyst also gets the indicator shortlist. Upstream's prompt
+        offers a twelve-indicator menu tuned for swing trading; left alone, a
+        two-year value run spends its tool calls on RSI and Bollinger bands and
+        then has to be told to ignore them. Narrowing the menu here keeps the
+        upstream prompt untouched.
+        """
+        guidance = self.analyst_guidance.get(analyst_key, "")
+        if analyst_key == "market" and self.indicator_shortlist:
+            shortlist = (
+                "Indicator selection: at this horizon only these indicators are "
+                f"relevant -- {', '.join(self.indicator_shortlist)}. Choose from "
+                "them instead of the full menu above, and do not call "
+                "get_indicators for any other."
+            )
+            guidance = f"{guidance}\n\n{shortlist}" if guidance else shortlist
+        return guidance
 
 
 def render_mandate_context(mandate: Mandate | None) -> str:
