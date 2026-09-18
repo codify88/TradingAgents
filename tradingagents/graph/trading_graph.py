@@ -743,6 +743,8 @@ class TradingAgentsGraph:
             ),
             instrument_context=self.resolve_instrument_context(company_name, asset_type, trade_date),
             portfolio_context=portfolio.render(company_name) if portfolio is not None else "",
+            mandate=self.mandate_name,
+            mandate_context=self.mandate_context,
         )
 
     def settle_pending(self, company_name):
@@ -762,7 +764,8 @@ class TradingAgentsGraph:
             logger.warning("No final decision for %s on %s; nothing logged", company_name, trade_date)
             return
         self.memory_log.store_decision(
-            ticker=company_name, trade_date=trade_date, final_trade_decision=decision
+            ticker=company_name, trade_date=trade_date, final_trade_decision=decision,
+            mandate=self.mandate_name,
         )
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock",

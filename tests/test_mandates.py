@@ -472,3 +472,58 @@ def test_rendered_momentum_context_carries_the_exit_discipline():
     text = render_mandate_context(EQUITY_MOMENTUM)
     assert "126 trading days" in text
     assert "kill criteria" in text.lower() or "invalidation" in text.lower()
+
+
+def test_a_completed_run_records_its_mandate_on_the_log_entry(tmp_path):
+    """Regression: the mandate tag was silently dropped in the v0.5.0 merge.
+
+    Upstream split the decision write out of _run_graph into record_decision,
+    and the re-applied hook no-matched against the new call, so a full
+    equity_momentum run logged an untagged entry -- which would later be graded
+    on the 5-day default instead of its own 126-day horizon. Asserting on the
+    write path rather than the constructor is the point: the constructor was
+    fine, and the entry still came out wrong.
+    """
+    g = object.__new__(TradingAgentsGraph)
+    g.mandate_name = "equity_momentum"
+    g.mandate = get_mandate("equity_momentum")
+    g.config = {}
+    g.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "log.md")})
+
+    TradingAgentsGraph.record_decision(
+        g, "NVDA", "2026-09-17", {"final_trade_decision": "**Rating**: Hold"}
+    )
+
+    entry = g.memory_log.load_entries()[0]
+    assert entry["mandate"] == "equity_momentum"
+    assert g._holding_days_for(entry["mandate"]) == EQUITY_MOMENTUM.horizon_days
+
+
+def test_the_run_state_carries_the_mandate_to_every_downstream_agent(tmp_path):
+    """Regression, and the more damaging of the pair.
+
+    The v0.5.0 merge moved state assembly into create_run_state and inlined the
+    instrument-context argument, so the re-applied mandate hook no-matched. The
+    mandate analysts still ran -- their prompts are self-contained -- but the
+    researchers, trader, risk debate and portfolio manager received no mandate
+    framing and none of the mandate analysts' reports, because mandate_section
+    returns '' when the state carries no mandate. A run looked healthy and was
+    silently unmandated from the debate onwards.
+    """
+    g = object.__new__(TradingAgentsGraph)
+    g.mandate_name = "equity_momentum"
+    g.mandate = get_mandate("equity_momentum")
+    g.mandate_context = render_mandate_context(g.mandate)
+    g.config = {"benchmark_map": {"": "SPY"}, "benchmark_ticker": None}
+    g.propagator = Propagator()
+    g.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "log.md")})
+    g.resolve_instrument_context = lambda *a, **k: "ticker NVDA"
+    g._memory_as_of = lambda d: None
+    g._resolve_pending_entries = lambda t: None
+
+    state = TradingAgentsGraph.create_run_state(g, "NVDA", "2026-09-17")
+
+    assert state["mandate"] == "equity_momentum"
+    assert "126 trading days" in state["mandate_context"]
+    # What the downstream agents actually interpolate:
+    assert mandate_section(state).startswith("INVESTMENT MANDATE")
