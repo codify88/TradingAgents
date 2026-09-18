@@ -286,11 +286,17 @@ The funnel (as run against the full US universe):
 
 | Tier | Narrows | Costs |
 |---|---|---|
-| universe | ~8,600 → ~6,300 | one `LISTING_STATUS` call |
+| universe | ~14,400 listings → ~5,700 common stocks | one `LISTING_STATUS` call (two for a past date) |
 | price | ~6,300 → ~230 | one batched download per 200 names |
 | liquidity budget | ~230 → `--budget` (60) | nothing — a neutral cut |
 | fundamentals | 60 → ~30 | a few Alpha Vantage calls per name |
 | ordering | ~30 → `--picks` + `--controls` | nothing |
+
+The universe tier keeps common shares only. About one Alpha Vantage "Stock"
+row in seven is really a warrant, right, unit, note or preferred; those are
+dropped by NASDAQ's symbol convention (a listed symbol plus a reserved suffix:
+ZION+O, AGNC+N) or by the filed name ("- Warrants (30/06/2028)"). Class
+shares such as GOOGL and FOXA are kept.
 
 Two rules make it honest:
 

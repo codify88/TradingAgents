@@ -11,7 +11,7 @@ continuous compute. Something cheap has to decide what gets adjudicated.
 
 | Tier | Narrows | Costs |
 |---|---|---|
-| universe | 8,590 → ~6,300 | one `LISTING_STATUS` call |
+| universe | ~14,400 listings → ~5,700 common stocks | one `LISTING_STATUS` call |
 | price | ~6,300 → ~230 | one batched download per 200 names |
 | liquidity budget | ~230 → ~60 | nothing; a neutral cut |
 | fundamentals | ~60 → ~30 | a few Alpha Vantage calls per name |
@@ -64,6 +64,19 @@ tier 3 is paid for.
 reports picks against controls. It refuses a verdict until both arms settle:
 picks returning well while no control has settled is a statement about the
 market over that window, not about the screen.
+
+## Common shares only
+
+About one Alpha Vantage "Stock" row in seven is a warrant, right, unit, note or
+preferred. Dashed symbols were always dropped; the undashed ones are now dropped
+by NASDAQ's convention (a listed symbol plus W/R/U/Z/P/O/N/M, or P plus one of
+those: ZION+O, AEP+PZ) or by the filed name. Checked against the full listing
+for false positives: class shares (GOOGL), "Preferred Bank" and a royalty
+trust's units (MARPS) are kept.
+
+A partial price batch also gets a second look before its missing symbols are
+believed: Yahoo throttles inside a batch, and a throttled symbol once read as
+"no price history".
 
 ## Survivorship
 

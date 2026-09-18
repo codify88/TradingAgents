@@ -276,3 +276,46 @@ class TestSecondLook:
         with patch("yfinance.download", return_value=_bars()):
             data = prices.download(["AAA", "BBB"], "2021-01-01", "2022-03-02", attempts=1)
         assert data.frames == {}
+
+
+# --- universe hygiene: undashed warrants, rights, units, notes, preferreds ------------
+
+
+class TestDerivativeLines:
+    """About one Alpha Vantage 'Stock' row in seven is not a common share."""
+
+    LISTED = {"ZION", "AGNC", "AEP", "GOOG", "MAR", "FOX", "ABLL", "AMZ"}
+
+    @pytest.mark.parametrize("symbol, name", [
+        ("ZIONO", "Zions Bancorporation N.A"),            # preferred, plain issuer name
+        ("AGNCN", "AGNC Investment Corp"),                 # preferred, plain issuer name
+        ("AEPPZ", "American Electric Power Company Inc"),  # P + letter: notes
+        ("ABLLW", "Abacus Global Management Inc - Warrants (30/06/2028)"),
+        ("VLDRW", "Velodyne Lidar Inc Warrant"),           # base not listed: the name decides
+        ("BRRWU", "Columbus Circle Capital Corp I Units"),
+        ("DYNC", "Dynegy Inc 700 Tangible Equity Units"),
+        ("PRHIZ", "Presurance Holdings Inc Sr Nt"),
+    ])
+    def test_non_common_lines_are_recognised(self, symbol, name):
+        assert universe.derivative_line(symbol, name, self.LISTED)
+
+    @pytest.mark.parametrize("symbol, name", [
+        ("GOOGL", "Alphabet Inc - Class A"),     # class letter, not a derivative code
+        ("FOXA", "Fox Corporation - Class A"),
+        ("MARPS", "Marine Petroleum Trust"),     # a trust's common units, not MAR + PS
+        ("PFBC", "Preferred Bank"),              # the word alone is not an instrument
+        ("UNTC", "Unit Corporation"),
+        ("AMZN", "Amazon.com Inc"),              # four letters: no suffix convention
+    ])
+    def test_common_shares_are_left_alone(self, symbol, name):
+        assert universe.derivative_line(symbol, name, self.LISTED) is None
+
+    def test_the_universe_drops_them(self, monkeypatch):
+        monkeypatch.setattr(universe, "get_current_date", lambda: "2026-09-18")
+        listing = ("symbol,name,exchange,assetType,ipoDate,delistingDate,status\n"
+                   "ZION,Zions Bancorporation N.A,NASDAQ,Stock,2000-01-03,null,Active\n"
+                   "ZIONO,Zions Bancorporation N.A,NASDAQ,Stock,2014-06-10,null,Active\n"
+                   "GOOG,Alphabet Inc - Class C,NASDAQ,Stock,2014-03-27,null,Active\n"
+                   "GOOGL,Alphabet Inc - Class A,NASDAQ,Stock,2004-08-19,null,Active\n")
+        with patch.object(universe, "_make_api_request", return_value=listing):
+            assert [c.symbol for c in universe.load_universe("2026-09-18")] == ["GOOG", "GOOGL", "ZION"]

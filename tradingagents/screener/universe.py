@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass
 
 import pandas as pd
@@ -28,6 +29,50 @@ MIN_LISTING_AGE_DAYS = 400
 
 # The earliest date Alpha Vantage's LISTING_STATUS will answer for.
 EARLIEST_HISTORICAL_DATE = "2010-01-01"
+
+# NASDAQ's fifth-letter codes for securities that are not common shares:
+# W warrants, R rights, U units, Z other (notes), P/O/N/M preferred series.
+# Class-share letters (A, B, C, K, L) are deliberately absent: GOOGL is
+# Alphabet's Class A common, not a derivative of GOOG.
+_DERIVATIVE_SUFFIXES = frozenset("WRUZPONM")
+
+# Instrument words as filers actually spell them. Tight on purpose: "Preferred
+# Bank" and "Unit Corporation" are common stocks, so a bare word never matches.
+_DERIVATIVE_NAME = re.compile(
+    r"\bwarrants?\b|\bwts?\s+(exp|pur)\b|\brights?\b|\brts?\s*$"
+    r"|-\s*units?\b|\bunits?\s*[(\d]|\bunits?\s*$|\btangible\s+equity\s+units?\b"
+    r"|\bdepositary\b|\bpfd\b|\bpreferred\s+(stock|shares|securities)\b"
+    r"|\bseries\s+[a-z]\s+preferred\b|\d+(\.\d+)?%\s|\bnotes\s+due\b"
+    r"|\bsr\s+nts?\b|\bdebentures\b",
+    re.IGNORECASE,
+)
+
+
+def derivative_line(symbol: str, name: str, listed: set[str]) -> str | None:
+    """Why ``symbol`` is a warrant, right, unit, note or preferred -- or None.
+
+    Alpha Vantage files these under assetType "Stock". Dashed symbols are caught
+    upstream; these are the undashed ones, about one "stock" row in eight. Two
+    signals, either sufficient:
+
+    * structure: a five-letter symbol that is another listed symbol plus a
+      reserved suffix (ZION+O, AGNC+N, AEP+PZ). This catches the many filed
+      under the issuer's plain name, which no name rule could.
+    * the filed name: "- Warrants (30/06/2028)", "Units (1 Ord Cls A ...)".
+
+    Checked against the full listing: of the structural matches whose names
+    carry no instrument word, every one read as a preferred, right, note or
+    unit once the two-letter case required P plus a reserved letter (which
+    keeps MARPS, a royalty trust's common units, from reading as MAR + PS).
+    """
+    if len(symbol) == 5:
+        if symbol[4] in _DERIVATIVE_SUFFIXES and symbol[:4] in listed:
+            return f"{symbol[:4]} line {symbol[4]}"
+        if symbol[3] == "P" and symbol[4] in _DERIVATIVE_SUFFIXES and symbol[:3] in listed:
+            return f"{symbol[:3]} line {symbol[3:]}"
+    if _DERIVATIVE_NAME.search(name):
+        return "named as a warrant, right, unit, note or preferred"
+    return None
 
 
 @dataclass(frozen=True)
@@ -87,8 +132,10 @@ def load_universe(
     else:
         listing = _make_api_request("LISTING_STATUS", {})
 
+    rows = _rows(listing)
+    listed_symbols = {r.get("symbol", "") for r in rows if r.get("assetType") == "Stock"}
     out = []
-    for row in _rows(listing):
+    for row in rows:
         if row.get("status") != "Active" or row.get("assetType") != "Stock":
             continue
         # Alpha Vantage files warrants, units, rights and preferred series under
@@ -99,6 +146,11 @@ def load_universe(
         if "-" in row.get("symbol", ""):
             continue
         if row.get("exchange", "").upper() not in allowed:
+            continue
+        # The undashed warrants, rights, units, notes and preferreds: not the
+        # common shares any mandate is written about, and each would otherwise
+        # cost a price download only to be dropped as "no price history".
+        if derivative_line(row.get("symbol", ""), row.get("name", ""), listed_symbols):
             continue
         ipo = row.get("ipoDate") or ""
         try:
