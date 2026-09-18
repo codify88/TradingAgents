@@ -148,7 +148,8 @@ class TestAlphaVantageFrame:
         fin.alpha_vantage_daily_strict.cache_clear()
         with patch.object(fin, "_make_api_request", return_value=self.CSV):
             frame = fin.alpha_vantage_daily("DDD")
-        assert list(frame.columns) == ["Open", "High", "Low", "Close", "Volume"]
+        assert list(frame.columns)[:5] == ["Open", "High", "Low", "Close", "Volume"]
+        assert frame["Raw Close"].tolist() == [10.0, 21.0], "as-reported prices kept for quoting"
         assert frame.index.is_monotonic_increasing
         # Adjusted by adjusted_close / close = 0.5 on both days.
         assert frame["Close"].tolist() == [5.0, 10.5]
@@ -319,3 +320,37 @@ class TestDerivativeLines:
                    "GOOGL,Alphabet Inc - Class A,NASDAQ,Stock,2004-08-19,null,Active\n")
         with patch.object(universe, "_make_api_request", return_value=listing):
             assert [c.symbol for c in universe.load_universe("2026-09-18")] == ["GOOG", "GOOGL", "ZION"]
+
+
+# --- the verified snapshot: fatal to a run when it finds no rows ----------------------
+
+
+class TestSnapshotFallback:
+    """The snapshot tool raises on no data, which ends the whole graph run. Live, a
+    historical screen-run on a delisted name died there before any analysis."""
+
+    FRAME = pd.DataFrame(
+        {"Open": [9.0], "High": [9.5], "Low": [8.5], "Close": [4.5], "Volume": [1000.0],
+         "Raw Open": [18.0], "Raw High": [19.0], "Raw Low": [17.0], "Raw Close": [18.5]},
+        index=[pd.Timestamp("2022-06-01")],
+    )
+
+    def _rows(self, chain):
+        from tradingagents.dataflows import market_data_validator as mdv
+        from tradingagents.dataflows.errors import NoMarketDataError
+
+        cfg = {"data_vendors": {"core_stock_apis": chain}}
+        with patch.object(mdv, "load_ohlcv", side_effect=NoMarketDataError("AAWW", "AAWW", "no price rows")), \
+             patch("tradingagents.dataflows.config.get_config", return_value=cfg), \
+             patch.object(fin, "alpha_vantage_daily", return_value=self.FRAME):
+            return mdv._verified_rows("AAWW", "2022-06-01")
+
+    def test_with_alpha_vantage_configured_the_snapshot_has_rows(self):
+        rows = self._rows("yfinance,alpha_vantage")
+        assert rows["Close"].iloc[-1] == 18.5, "quoted as reported, not dividend-adjusted"
+
+    def test_on_yahoo_alone_it_raises_exactly_as_before(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+
+        with pytest.raises(NoMarketDataError):
+            self._rows("yfinance")

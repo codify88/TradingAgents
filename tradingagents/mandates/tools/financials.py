@@ -333,6 +333,12 @@ def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
         "Low": raw["low"] * factor,
         "Close": raw["adjusted_close"],
         "Volume": raw["volume"],
+        # As reported, for callers that quote prices rather than compute
+        # returns from them (the verified market snapshot).
+        "Raw Open": raw["open"],
+        "Raw High": raw["high"],
+        "Raw Low": raw["low"],
+        "Raw Close": raw["close"],
     })
     return out.dropna(subset=["Close"]).sort_index()
 
