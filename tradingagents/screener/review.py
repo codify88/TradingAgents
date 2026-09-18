@@ -173,7 +173,10 @@ def render_performance(config: dict, mandate: str | None = None) -> str:
         "benchmark that matters: beating the market while losing to your own "
         "control means the exclusions are working and the ordering is not.",
         "",
-        "| Screen | Mandate | As of | Picks settled | Picks mean alpha | Control settled | Control mean alpha | Edge |",
+        "Screen ids are the time suffix of the manifest filename under "
+        "`results_dir/screens/`.",
+        "",
+        "| Screen | Style | As of | Picks | Picks α | Control | Control α | Edge |",
         "|---|---|---|---|---|---|---|---|",
     ]
     totals = {"picks": [], "control": []}
@@ -183,8 +186,12 @@ def render_performance(config: dict, mandate: str | None = None) -> str:
             _pct(picks.mean_alpha - control.mean_alpha)
             if picks.measurable and control.measurable else "—"
         )
+        # Short forms so the table survives an 80-column terminal; the full
+        # run_id is the manifest filename.
+        short_id = manifest.run_id.rsplit("_", 1)[-1]
+        style = (manifest.mandate or "none").removeprefix("equity_")
         lines.append(
-            f"| `{manifest.run_id}` | {manifest.mandate or 'none'} | {manifest.as_of} "
+            f"| {short_id} | {style} | {manifest.as_of} "
             f"| {picks.settled}/{len(picks.symbols)} | {_pct(picks.mean_alpha)} "
             f"| {control.settled}/{len(control.symbols)} | {_pct(control.mean_alpha)} | {edge} |"
         )

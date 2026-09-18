@@ -220,5 +220,18 @@ no-mandate grading window, with a mandate's horizon overriding it. Upstream
 also shipped things adjacent to this plan: `run_backtest` over a ticker/date
 grid, `propagate(..., portfolio=...)`, and an SEC EDGAR fundamentals vendor.
 
-**Not yet started.** P4 (screener). Upstream's backtest harness is likely the
-right base for validating a mandate rather than a second implementation.
+**P4 is landed.** `tradingagents screen --mandate <name>` narrows the universe
+to a shortlist without spending an LLM call, and `tradingagents screen-review`
+reports whether those shortlists beat their controls. See
+`docs/design/screener.md`.
+
+**Decisions can now be superseded.** A re-run for the same ticker, date and
+mandate was silently dropped, which is right when the re-run is incidental and
+wrong when it happened because the analysis improved -- the log kept teaching,
+and would eventually grade, the decision that had been replaced. `--supersede`
+retires the old entry (marked, not deleted) and records the new one.
+
+**Still open.** Tier 3 is manual: the screen prints the `backtest` command to
+run its shortlist and control through the loop, but nothing runs it for you.
+Wiring that up is the obvious next step, and upstream's `run_backtest` already
+does the grid, so it is plumbing rather than new machinery.
