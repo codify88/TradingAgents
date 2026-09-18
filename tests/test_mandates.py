@@ -193,13 +193,14 @@ def test_run_signature_keys_on_the_mandates_own_analysts():
         return g._run_signature("stock")
 
     assert sig("equity_value").endswith("|mandate_analysts=quality,valuation")
-    # Mandates without analysts, and no mandate, keep their existing signature.
-    # (upstream v0.5.0 added the portfolio field ahead of ours.)
-    assert sig("equity_momentum") == (
-        "analysts=market|debate=1|risk=1|asset=stock|mandate=equity_momentum"
-        "|portfolio=none"
+    assert sig("equity_momentum").endswith("|mandate_analysts=momentum,growth")
+    # A mandate's analysts are part of the key, so the two never share a
+    # checkpoint even at the same ticker, date and analyst selection.
+    assert sig("equity_value") != sig("equity_momentum")
+    # No mandate keeps upstream's signature untouched (v0.5.0 added portfolio).
+    assert sig("") == (
+        "analysts=market|debate=1|risk=1|asset=stock|mandate=|portfolio=none"
     )
-    assert "mandate_analysts" not in sig("")
 
 
 # --- memory log round-trip ------------------------------------------------
@@ -441,3 +442,33 @@ def test_shortlist_reaches_the_rendered_market_prompt():
     state = {"mandate": "equity_value", "mandate_context": render_mandate_context(EQUITY_VALUE)}
     rendered = apply_mandate_to_system_message(state, "market", "UPSTREAM PROMPT")
     assert rendered.index("UPSTREAM PROMPT") < rendered.index("Indicator selection")
+
+
+# --- P3: equity_momentum completeness -------------------------------------
+
+
+def test_momentum_mandate_frames_risk_for_its_horizon():
+    """A momentum drawdown is evidence against the thesis; a value drawdown may
+    be an opportunity. The risk framing must not be shared between them."""
+    assert EQUITY_MOMENTUM.risk_frame
+    assert "invalidation" in EQUITY_MOMENTUM.risk_frame
+    assert EQUITY_MOMENTUM.risk_frame != EQUITY_VALUE.risk_frame
+
+
+def test_both_mandates_are_now_fully_specified():
+    """Every field that shapes a run is populated for both, so neither silently
+    falls back to upstream's short-horizon defaults."""
+    for mandate in (EQUITY_VALUE, EQUITY_MOMENTUM):
+        assert mandate.analysts, mandate.name
+        assert mandate.risk_frame, mandate.name
+        assert mandate.thesis_frame, mandate.name
+        assert mandate.rating_guidance, mandate.name
+        assert mandate.disqualifiers, mandate.name
+        assert mandate.indicator_shortlist, mandate.name
+        assert mandate.review_horizons_days, mandate.name
+
+
+def test_rendered_momentum_context_carries_the_exit_discipline():
+    text = render_mandate_context(EQUITY_MOMENTUM)
+    assert "126 trading days" in text
+    assert "kill criteria" in text.lower() or "invalidation" in text.lower()

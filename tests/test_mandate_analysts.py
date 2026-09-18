@@ -83,8 +83,24 @@ class TestDeclaration:
         assert EQUITY_VALUE.analyst("valuation").label == "Valuation Analyst"
         assert EQUITY_VALUE.analyst("nope") is None
 
-    def test_momentum_adds_no_analysts_yet(self):
-        assert EQUITY_MOMENTUM.analysts == ()
+    def test_equity_momentum_declares_momentum_then_growth(self):
+        assert [a.key for a in EQUITY_MOMENTUM.analysts] == ["momentum", "growth"]
+        assert EQUITY_MOMENTUM.analyst("momentum").label == "Momentum Analyst"
+
+    def test_the_two_mandates_share_no_analyst_keys(self):
+        """Reports are keyed by analyst key in one state channel, so a shared key
+        across mandates would be ambiguous the moment both could run."""
+        assert not ({a.key for a in EQUITY_VALUE.analysts}
+                    & {a.key for a in EQUITY_MOMENTUM.analysts})
+
+    def test_each_momentum_analyst_sees_only_its_half_of_the_question(self):
+        """Price and fundamental momentum disagreeing is itself the signal this
+        mandate screens on; two analysts who can each see only one side cannot
+        reconcile that disagreement away before the debate hears it."""
+        tools = {a.key: {t.name for t in a.tools} for a in EQUITY_MOMENTUM.analysts}
+        assert tools["momentum"] == {"get_relative_strength", "get_trend_structure"}
+        assert tools["growth"] == {"get_growth_trajectory", "get_estimate_revisions"}
+        assert not (tools["momentum"] & tools["growth"])
 
 
 # --- the analyst node ------------------------------------------------------------
@@ -245,7 +261,12 @@ class TestValueFraming:
         assert "not by price stops" in ctx
 
     def test_mandate_without_a_risk_frame_renders_no_risk_line(self):
-        assert "How to judge risk" not in render_mandate_context(EQUITY_MOMENTUM)
+        """Both shipped mandates now set one, so the absent path needs its own
+        fixture rather than borrowing whichever mandate is least finished."""
+        from tradingagents.mandates import Mandate
+
+        bare = Mandate(name="bare", label="Bare", description="d")
+        assert "How to judge risk" not in render_mandate_context(bare)
 
     def test_fundamentals_analyst_is_told_not_to_quote_ranges_from_memory(self):
         """The P1 KO run invented a 'normal 20-22x' P/E band; its computed range is 23-32x."""

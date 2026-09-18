@@ -232,6 +232,52 @@ def price_history(ticker: str, start: pd.Timestamp, as_of: pd.Timestamp) -> pd.S
     return series[series.index <= as_of]
 
 
+@functools.lru_cache(maxsize=64)
+def _ohlcv_history(symbol: str, start: str, end: str) -> pd.DataFrame:
+    import yfinance as yf
+
+    from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+    # auto_adjust=True here, unlike _price_history: a return series must be
+    # total-return (dividends reinvested) to compare one instrument against
+    # another, whereas a market capitalisation must not be dividend-adjusted.
+    hist = yf.Ticker(normalize_symbol(symbol)).history(
+        start=start, end=end, auto_adjust=True,
+    )
+    if hist is None or hist.empty or "Close" not in hist:
+        return pd.DataFrame()
+    frame = hist[[c for c in ("Open", "High", "Low", "Close", "Volume") if c in hist]].astype(float)
+    if getattr(frame.index, "tz", None) is not None:
+        frame.index = frame.index.tz_localize(None)
+    return frame.sort_index()
+
+
+def ohlcv_history(ticker: str, start: pd.Timestamp, as_of: pd.Timestamp) -> pd.DataFrame:
+    """Daily OHLCV through ``as_of`` inclusive, dividend-adjusted, never beyond it.
+
+    Momentum reads volume and highs, which the valuation path never needed.
+    Adjusted closes so a high-yield name is not scored as a weaker trend than an
+    equivalent one that pays nothing.
+    """
+    end = (as_of + pd.Timedelta(days=1)).strftime("%Y-%m-%d")  # yfinance end is exclusive
+    frame = _ohlcv_history(ticker.strip().upper(), start.strftime("%Y-%m-%d"), end)
+    return frame[frame.index <= as_of] if not frame.empty else frame
+
+
+@functools.lru_cache(maxsize=128)
+def overview(ticker: str) -> dict:
+    """Alpha Vantage OVERVIEW, for the sector a name should be ranked within.
+
+    Not point-in-time: it describes the company today. Only fields that do not
+    move -- sector, industry -- may be read from it on a historical run.
+    """
+    try:
+        data = json.loads(_fetch("OVERVIEW", ticker.strip().upper()))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def close_on_or_before(prices: pd.Series, when: pd.Timestamp) -> tuple[pd.Timestamp, float] | None:
     """The last close at or before ``when`` (within a week), or None."""
     window = prices[(prices.index <= when) & (prices.index > when - pd.Timedelta(days=7))]

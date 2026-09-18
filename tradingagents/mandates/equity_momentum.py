@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .analysts.momentum import MOMENTUM_ANALYSTS
 from .base import Mandate
 
 EQUITY_MOMENTUM = Mandate(
@@ -85,4 +86,19 @@ EQUITY_MOMENTUM = Mandate(
     indicator_shortlist=(
         "close_50_sma", "close_200_sma", "close_10_ema", "macd", "macds", "rsi", "atr", "vwma",
     ),
+    risk_frame=(
+        "risk at this horizon is the trend breaking while you are still in it, and "
+        "the cost of being wrong is measured from the entry to the invalidation "
+        "level -- so a thesis without a named level has undefined risk and cannot "
+        "be sized. Weigh three things: distance to invalidation in ATRs, because "
+        "that is what a loss actually costs; the chance the fundamental leg turns "
+        "first (decelerating growth, estimate revisions rolling over), because "
+        "price usually follows it; and crowding, because a consensus long unwinds "
+        "faster than it accumulated. Unlike a long-horizon mandate, a drawdown "
+        "here is not an opportunity to add -- it is evidence against the thesis "
+        "until the trend structure repairs. Act early on deterioration rather "
+        "than waiting for confirmation: at this horizon the cost of being late "
+        "exceeds the cost of being early."
+    ),
+    analysts=MOMENTUM_ANALYSTS,
 )
