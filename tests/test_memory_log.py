@@ -118,13 +118,16 @@ def _graph_mock():
     ``MagicMock(spec=...)`` constrains which attributes exist but not their
     values, so every attribute reads back as a truthy mock. The mandate hooks
     (``_resolve_benchmark`` consults ``mandate.benchmark``; ``_fetch_returns``
-    defaults its window from ``_holding_days_for``) therefore have to be pinned
+    defaults its window from ``_holding_days_for``; ``_resolve_pending_entries``
+    asks ``_due_reviews`` for interim checkpoints) therefore have to be pinned
     to their unmandated defaults for these tests to exercise upstream behaviour.
     """
     g = MagicMock(spec=TradingAgentsGraph)
     g.mandate = None
     g.mandate_name = ""
     g._holding_days_for.return_value = TradingAgentsGraph.DEFAULT_HOLDING_DAYS
+    g._horizons_for.return_value = (TradingAgentsGraph.DEFAULT_HOLDING_DAYS,)
+    g._due_reviews.return_value = []   # no mandate -> no review horizons
     return g
 
 class TestTradingMemoryLogCore:

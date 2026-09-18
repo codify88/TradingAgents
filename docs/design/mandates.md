@@ -82,12 +82,42 @@ each decision; the CLI asks for one as step 2 and `TRADINGAGENTS_MANDATE` sets
 it for unattended runs. With no mandate selected every rendered prompt is
 byte-identical to upstream.
 
-**Known gap.** `review_horizons_days` is declared and validated but interim
-grading is not implemented yet: a pending entry is still settled once, at the
-primary horizon. For `equity_value` that means no reflection for two years,
-which is the next thing worth building (it needs a log schema that can hold
-several outcomes per entry). Until then a long-horizon mandate produces sound
-analysis but no learning signal.
+**Interim grading is landed.** A pending entry is now checkpointed at every
+`review_horizons_days` milestone that has come due, and settled once at the
+primary horizon. One log entry therefore holds several outcomes:
+
+```
+[2026-09-17 | KO | Hold | pending | mandate:equity_value]
+
+DECISION:
+...
+
+REVIEW 63d @ 2026-12-16: raw +3.2% | alpha -1.1%
+Tracking but lagging SPY by 1.1pp; at 13% of the horizon that is noise.
+
+REVIEW 126d @ 2027-03-17: raw +8.1% | alpha +2.4%
+FCF coverage normalised in Q4; the flag that blocked adding has cleared.
+```
+
+Three properties matter:
+
+1. **A checkpoint is not a verdict.** The interim reflection runs off its own
+   prompt, which states how much of the horizon has elapsed and forbids calling
+   the decision right or wrong. Injected context labels the entry `in progress`.
+   Reusing the final-reflection prompt would have manufactured a verdict at 13%
+   of the horizon — the same short-termism the mandate exists to remove, just
+   relocated.
+2. **Point-in-time discipline extends to checkpoints.** A review is visible to a
+   later run only once its own resolution date has passed, so a backtest cannot
+   read a checkpoint that had not happened yet (#1251).
+3. **The unmandated path is untouched.** No mandate means no review horizons,
+   so an upstream-shaped run makes exactly the price requests it made before.
+
+Two bugs surfaced on the way and are fixed here: the outcome window asked for
+`holding_days + 7` *calendar* days, so a 504-trading-day horizon could never
+settle (it requested 511 days for a window that spans ~730); and log rotation
+identified pending entries by the tag suffix `| pending]`, which the `mandate:`
+marker broke, making unresolved long-horizon work prunable.
 
 **Not yet started.** P2 (value analysis tools and analysts), P3 (momentum),
 P4 (screener).

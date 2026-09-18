@@ -301,15 +301,13 @@ class TradingAgentsGraph:
 
     DEFAULT_HOLDING_DAYS = 5
 
-    def _holding_days_for(self, mandate_name: str = "") -> int:
-        """Trading days to grade a decision over.
+    def _mandate_for(self, mandate_name: str = ""):
+        """The mandate a decision should be graded under, or None.
 
         Resolution order: the mandate the decision was *made* under (recorded on
-        its memory-log entry), then this graph's mandate, then upstream's 5-day
-        default. Grading a two-year value thesis on a five-day return is the
-        single most damaging default for long-horizon work -- it teaches the
-        memory log that patience is a mistake -- so the decision's own mandate
-        wins even when the current run uses a different one.
+        its memory-log entry), then this graph's mandate, then nothing. The
+        decision's own mandate wins even when the current run uses a different
+        one, so a two-year value thesis is never re-graded as a momentum trade.
         """
         for name in (mandate_name, self.mandate_name):
             if not name:
@@ -319,8 +317,97 @@ class TradingAgentsGraph:
             except ValueError:
                 continue  # a log entry from a mandate this build no longer knows
             if mandate is not None:
-                return mandate.horizon_days
-        return self.DEFAULT_HOLDING_DAYS
+                return mandate
+        return None
+
+    def _holding_days_for(self, mandate_name: str = "") -> int:
+        """Trading days to grade a decision over.
+
+        Falls back to upstream's 5-day default with no mandate. Grading a
+        two-year value thesis on a five-day return is the single most damaging
+        default for long-horizon work -- it teaches the memory log that patience
+        is a mistake.
+        """
+        mandate = self._mandate_for(mandate_name)
+        return mandate.horizon_days if mandate is not None else self.DEFAULT_HOLDING_DAYS
+
+    def _horizons_for(self, mandate_name: str = "") -> tuple[int, ...]:
+        """Every horizon this decision is graded at, earliest first.
+
+        The last element is the primary horizon that settles the entry; the ones
+        before it are interim review checkpoints. Without a mandate there is a
+        single horizon, which is exactly upstream's behaviour.
+        """
+        mandate = self._mandate_for(mandate_name)
+        if mandate is None:
+            return (self.DEFAULT_HOLDING_DAYS,)
+        return mandate.all_horizons_days
+
+    @staticmethod
+    def _calendar_span(trading_days: int) -> int:
+        """Calendar days to request to be sure ``trading_days`` bars have printed.
+
+        252 trading days is about 365 calendar days, so a fixed weekend buffer
+        is only ever right for very short windows: asking for 504 trading days
+        over 511 calendar days returns barely two thirds of the window, and the
+        entry would stay pending forever. Scale, then add slack for holidays.
+        """
+        return int(trading_days * 1.5) + 10
+
+    @staticmethod
+    def _returns_at_horizons(
+        ticker: str, trade_date: str, horizons, benchmark: str = "SPY",
+    ) -> dict:
+        """Raw/alpha return and resolution date at each horizon that has settled.
+
+        One price download covers every horizon, so checking three interim
+        checkpoints costs the same two requests as checking one. Horizons whose
+        full window has not traded yet are simply absent from the result (#1169),
+        as are all of them when the symbol is unreachable.
+        """
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+        horizons = sorted({int(h) for h in horizons})
+        if not horizons:
+            return {}
+        try:
+            start = datetime.strptime(trade_date, "%Y-%m-%d")
+            end = start + timedelta(days=TradingAgentsGraph._calendar_span(horizons[-1]))
+            end_str = end.strftime("%Y-%m-%d")
+
+            # Normalize so the realized-return lookup hits the same instrument
+            # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
+            # already a canonical Yahoo symbol from ``_resolve_benchmark``.
+            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
+            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+
+            settled = {}
+            for days in horizons:
+                # Require the full window in both series. A rerun before it has
+                # traded leaves the horizon unsettled to retry next run, rather
+                # than settling on a premature partial return (#1169).
+                if len(stock) <= days or len(bench) <= days:
+                    continue
+                raw = float(
+                    (stock["Close"].iloc[days] - stock["Close"].iloc[0])
+                    / stock["Close"].iloc[0]
+                )
+                bench_ret = float(
+                    (bench["Close"].iloc[days] - bench["Close"].iloc[0])
+                    / bench["Close"].iloc[0]
+                )
+                # The date of the last price bar used is when this outcome became
+                # known — the point-in-time cutoff for injecting the lesson (#1251).
+                settled[days] = (
+                    raw, raw - bench_ret, stock.index[days].strftime("%Y-%m-%d"),
+                )
+            return settled
+        except Exception as e:
+            logger.warning(
+                "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
+                ticker, trade_date, benchmark, e,
+            )
+            return {}
 
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int | None = None,
@@ -339,53 +426,29 @@ class TradingAgentsGraph:
         the full holding window has not traded (#1169), or the symbol is delisted
         or unreachable.
         """
-        from tradingagents.dataflows.symbol_utils import normalize_symbol
-
         if holding_days is None:
             holding_days = self._holding_days_for()
-        try:
-            start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
-            end_str = end.strftime("%Y-%m-%d")
-
-            # Normalize so the realized-return lookup hits the same instrument
-            # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
-            # already a canonical Yahoo symbol from ``_resolve_benchmark``.
-            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
-
-            # Require the full holding window in both series. A rerun before it
-            # has traded leaves the entry pending to retry next run, rather than
-            # settling on a premature partial return (#1169).
-            if len(stock) <= holding_days or len(bench) <= holding_days:
-                return None, None, None, None
-
-            raw = float(
-                (stock["Close"].iloc[holding_days] - stock["Close"].iloc[0])
-                / stock["Close"].iloc[0]
-            )
-            bench_ret = float(
-                (bench["Close"].iloc[holding_days] - bench["Close"].iloc[0])
-                / bench["Close"].iloc[0]
-            )
-            alpha = raw - bench_ret
-            # The date of the last price bar used is when this outcome became
-            # known — the point-in-time cutoff for injecting the lesson (#1251).
-            resolution_date = stock.index[holding_days].strftime("%Y-%m-%d")
-            return raw, alpha, holding_days, resolution_date
-        except Exception as e:
-            logger.warning(
-                "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
-                ticker, trade_date, benchmark, e,
-            )
+        # Called unbound in places, so reach the primitive through the class.
+        settled = TradingAgentsGraph._returns_at_horizons(
+            ticker, trade_date, (holding_days,), benchmark,
+        )
+        if holding_days not in settled:
             return None, None, None, None
+        raw, alpha, resolution_date = settled[holding_days]
+        return raw, alpha, holding_days, resolution_date
 
     def _resolve_pending_entries(self, ticker: str) -> None:
-        """Resolve pending log entries for ticker at the start of a new run.
+        """Settle or checkpoint pending log entries for ticker at the start of a run.
 
-        Fetches returns for each same-ticker pending entry, generates reflections,
-        then writes all updates in a single atomic batch write to avoid redundant I/O.
-        Skips entries whose price data is not yet available (too recent or delisted).
+        Two outcomes per entry are possible. If the primary horizon has fully
+        traded the entry is settled as before: reflection written, tag resolved.
+        If it has not, any interim review horizon that *has* come due is recorded
+        as a checkpoint on the still-pending entry. That is what gives a
+        long-horizon mandate a learning signal before it settles -- an
+        equity_value call would otherwise teach nothing for two years.
+
+        Writes are batched: all reviews in one atomic write, all settlements in
+        another. Entries whose price data is not yet available are left alone.
 
         Trade-off: only same-ticker entries are resolved per run.  Entries for
         other tickers accumulate until that ticker is run again.
@@ -395,33 +458,84 @@ class TradingAgentsGraph:
             return
 
         benchmark = self._resolve_benchmark(ticker)
-        updates = []
+        updates, reviews = [], []
         for entry in pending:
+            mandate_name = entry.get("mandate", "")
+            primary = self._holding_days_for(mandate_name)
             raw, alpha, days, resolution_date = self._fetch_returns(
-                ticker, entry["date"], benchmark=benchmark,
-                holding_days=self._holding_days_for(entry.get("mandate", "")),
+                ticker, entry["date"], benchmark=benchmark, holding_days=primary,
             )
-            if raw is None:
-                continue  # price not available yet — try again next run
-            reflection = self.reflector.reflect_on_final_decision(
+            if raw is not None:
+                reflection = self.reflector.reflect_on_final_decision(
+                    final_decision=entry.get("decision", ""),
+                    raw_return=raw,
+                    alpha_return=alpha,
+                    benchmark_name=benchmark,
+                )
+                updates.append({
+                    "ticker": ticker,
+                    "trade_date": entry["date"],
+                    "mandate": mandate_name,
+                    "raw_return": raw,
+                    "alpha_return": alpha,
+                    "holding_days": days,
+                    "reflection": reflection,
+                    "resolution_date": resolution_date,
+                })
+                # Interim checkpoints are moot once the final outcome is known:
+                # the reflection above carries the lesson, and back-filling
+                # superseded checkpoints would only spend LLM calls.
+                continue
+            reviews.extend(
+                self._due_reviews(entry, ticker, primary, benchmark)
+            )
+
+        if reviews:
+            self.memory_log.batch_append_reviews(reviews)
+        if updates:
+            self.memory_log.batch_update_with_outcomes(updates)
+
+    def _due_reviews(
+        self, entry: dict, ticker: str, primary: int, benchmark: str,
+    ) -> list[dict]:
+        """Interim checkpoints that have come due on one unsettled entry.
+
+        Skips horizons already recorded, so reviews are written once and a rerun
+        is free. Returns [] for a mandate that declares no review horizons --
+        including the no-mandate case -- which keeps an upstream run on exactly
+        its old code path, with no extra price requests.
+        """
+        horizons = self._horizons_for(entry.get("mandate", ""))
+        already = {r["days"] for r in entry.get("reviews", ())}
+        candidates = [h for h in horizons[:-1] if h not in already]
+        if not candidates:
+            return []
+
+        settled = self._returns_at_horizons(
+            ticker, entry["date"], candidates, benchmark,
+        )
+        due = []
+        for days in sorted(settled):
+            raw, alpha, resolution_date = settled[days]
+            note = self.reflector.reflect_on_interim_outcome(
                 final_decision=entry.get("decision", ""),
                 raw_return=raw,
                 alpha_return=alpha,
+                elapsed_days=days,
+                horizon_days=primary,
                 benchmark_name=benchmark,
             )
-            updates.append({
+            due.append({
                 "ticker": ticker,
                 "trade_date": entry["date"],
                 "mandate": entry.get("mandate", ""),
+                "horizon_days": days,
                 "raw_return": raw,
                 "alpha_return": alpha,
-                "holding_days": days,
-                "reflection": reflection,
                 "resolution_date": resolution_date,
+                "note": note,
             })
-
-        if updates:
-            self.memory_log.batch_update_with_outcomes(updates)
+        return due
 
     def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
         """Resolve ticker identity once and return the full instrument context.

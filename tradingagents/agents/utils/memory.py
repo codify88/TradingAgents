@@ -12,8 +12,18 @@ class TradingMemoryLog:
     # HTML comment: cannot appear in LLM prose output, safe as a hard delimiter
     _SEPARATOR = "\n\n<!-- ENTRY_END -->\n\n"
     # Precompiled patterns — avoids re-compilation on every load_entries() call
-    _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
+    _DECISION_RE = re.compile(
+        r"DECISION:\n(.*?)(?=\n\nREVIEW \d+d @ |\nREFLECTION:|\Z)", re.DOTALL
+    )
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
+    # Interim checkpoints on a still-pending entry. A long-horizon decision is
+    # graded several times before it settles, so one entry holds several
+    # outcomes: N REVIEW blocks, then at most one REFLECTION.
+    _REVIEW_RE = re.compile(
+        r"^REVIEW (\d+)d @ (\d{4}-\d{2}-\d{2}): raw (\S+) \| alpha (\S+)\n"
+        r"(.*?)(?=\n\nREVIEW \d+d @ |\n\nREFLECTION:|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
 
     def __init__(self, config: dict = None):
         cfg = config or {}
@@ -92,10 +102,29 @@ class TradingMemoryLog:
         ``as_of``. This keeps a historical/backtest run from learning from
         outcomes that had not happened yet (#1251). ``as_of=None`` disables the
         filter, so live runs and pre-migration entries are unaffected.
+
+        A *pending* entry is included once it carries at least one interim
+        review that has come due. Without this a long-horizon mandate teaches
+        nothing until its thesis settles -- two years, for equity_value -- which
+        is precisely what review horizons exist to prevent. Only reviews whose
+        own resolution date has passed are shown, so the point-in-time guarantee
+        holds for checkpoints exactly as it does for final outcomes.
         """
-        entries = [e for e in self.load_entries() if not e.get("pending")]
-        if as_of is not None:
-            entries = [e for e in entries if e.get("resolved") and e["resolved"] <= as_of]
+        entries = []
+        for e in self.load_entries():
+            if not e.get("pending"):
+                if as_of is not None and not (
+                    e.get("resolved") and e["resolved"] <= as_of
+                ):
+                    continue
+                entries.append(e)
+                continue
+            visible = [
+                r for r in e.get("reviews", ())
+                if as_of is None or r["resolved"] <= as_of
+            ]
+            if visible:
+                entries.append({**e, "reviews": visible})
         if not entries:
             return ""
 
@@ -206,6 +235,69 @@ class TradingMemoryLog:
         tmp_path.write_text(new_text, encoding="utf-8")
         tmp_path.replace(self._log_path)
 
+    def batch_append_reviews(self, reviews: list[dict]) -> None:
+        """Record interim outcomes on entries that are still pending.
+
+        A review is a checkpoint, not a verdict: the entry keeps its ``pending``
+        tag and will be settled later at its mandate's primary horizon. This is
+        what stops a two-year value thesis from producing no learning signal for
+        two years -- each review is injectable into later runs the moment its
+        own resolution date has passed.
+
+        Each element needs: ticker, trade_date, mandate, horizon_days,
+        raw_return, alpha_return, resolution_date, note.
+        """
+        if not self._log_path or not self._log_path.exists() or not reviews:
+            return
+
+        # Several horizons can come due for one entry in a single run (a long
+        # gap between runs), so group them and append in horizon order.
+        grouped: dict[tuple[str, str, str], list[dict]] = {}
+        for r in reviews:
+            key = (r["trade_date"], r["ticker"], r.get("mandate", ""))
+            grouped.setdefault(key, []).append(r)
+        for group in grouped.values():
+            group.sort(key=lambda r: r["horizon_days"])
+
+        text = self._log_path.read_text(encoding="utf-8")
+        blocks = text.split(self._SEPARATOR)
+
+        new_blocks = []
+        for block in blocks:
+            stripped = block.strip()
+            if not stripped:
+                new_blocks.append(block)
+                continue
+
+            tag_line = stripped.splitlines()[0].strip()
+            appended = False
+            for key, group in list(grouped.items()):
+                trade_date, ticker, mandate = key
+                match = self._match_pending_tag(tag_line, f"[{trade_date} | {ticker} |")
+                if match is None or match[1] != mandate:
+                    continue
+                body = stripped
+                for r in group:
+                    # Idempotency: never write the same horizon twice, even if a
+                    # caller re-offers one that is already on the entry.
+                    if f"REVIEW {r['horizon_days']}d @ " in body:
+                        continue
+                    body += "\n\n" + self._render_review(r)
+                new_blocks.append(body)
+                del grouped[key]
+                appended = True
+                break
+
+            if not appended:
+                new_blocks.append(block)
+
+        # No rotation pass: a review resolves nothing, so the resolved-entry
+        # count that rotation caps is unchanged.
+        new_text = self._SEPARATOR.join(new_blocks)
+        tmp_path = self._log_path.with_suffix(".tmp")
+        tmp_path.write_text(new_text, encoding="utf-8")
+        tmp_path.replace(self._log_path)
+
     def batch_update_with_outcomes(self, updates: list[dict]) -> None:
         """Apply multiple outcome updates in a single read + atomic write.
 
@@ -266,6 +358,29 @@ class TradingMemoryLog:
     # --- Helpers ---
 
     @staticmethod
+    def _is_resolved_tag(tag_line: str) -> bool:
+        """Whether a tag line belongs to a settled entry.
+
+        Parses the fields rather than suffix-matching ``| pending]``: a pending
+        tag can carry trailing markers (``mandate:``), so a suffix test would
+        misread a mandated pending entry as resolved and let rotation prune
+        unfinished work.
+        """
+        if not (tag_line.startswith("[") and tag_line.endswith("]")):
+            return False
+        fields = [f.strip() for f in tag_line[1:-1].split("|")]
+        return len(fields) >= 4 and fields[3] != "pending"
+
+    @staticmethod
+    def _render_review(r: dict) -> str:
+        """One REVIEW block: the checkpoint line plus its interim note."""
+        return (
+            f"REVIEW {r['horizon_days']}d @ {r['resolution_date']}: "
+            f"raw {r['raw_return']:+.1%} | alpha {r['alpha_return']:+.1%}\n"
+            f"{r['note'].strip()}"
+        )
+
+    @staticmethod
     def _resolved_tag(
         trade_date, ticker, rating, raw_pct, alpha_pct, holding_days,
         resolution_date, mandate="",
@@ -300,12 +415,7 @@ class TradingMemoryLog:
                 decisions.append((block, False))
                 continue
             tag_line = stripped.splitlines()[0].strip()
-            is_resolved = (
-                tag_line.startswith("[")
-                and tag_line.endswith("]")
-                and not tag_line.endswith("| pending]")
-            )
-            decisions.append((block, is_resolved))
+            decisions.append((block, self._is_resolved_tag(tag_line)))
 
         resolved_count = sum(1 for _, r in decisions if r)
         if resolved_count <= self._max_entries:
@@ -359,19 +469,57 @@ class TradingMemoryLog:
         reflection_match = self._REFLECTION_RE.search(body)
         entry["decision"] = decision_match.group(1).strip() if decision_match else ""
         entry["reflection"] = reflection_match.group(1).strip() if reflection_match else ""
+        # Interim outcomes, oldest horizon first. Empty for entries written
+        # before review horizons existed, and for short-horizon mandates that
+        # declare none.
+        entry["reviews"] = [
+            {
+                "days": int(m.group(1)),
+                "resolved": m.group(2),
+                "raw": m.group(3),
+                "alpha": m.group(4),
+                "note": m.group(5).strip(),
+            }
+            for m in self._REVIEW_RE.finditer(body)
+        ]
         return entry
 
     def _format_full(self, e: dict) -> str:
-        raw = e["raw"] or "n/a"
-        alpha = e["alpha"] or "n/a"
-        holding = e["holding"] or "n/a"
-        tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {raw} | {alpha} | {holding}]"
+        reviews = e.get("reviews", ())
+        if e.get("pending"):
+            # Label it unmistakably: a future analyst must not read a checkpoint
+            # as a settled verdict and conclude the thesis already worked. The
+            # mandate rides along because it is what makes the elapsed days
+            # interpretable -- 63 days is early for one style and late for another.
+            mandate = f" | {e['mandate']}" if e.get("mandate") else ""
+            tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | in progress{mandate}]"
+        else:
+            raw = e["raw"] or "n/a"
+            alpha = e["alpha"] or "n/a"
+            holding = e["holding"] or "n/a"
+            tag = (
+                f"[{e['date']} | {e['ticker']} | {e['rating']} | "
+                f"{raw} | {alpha} | {holding}]"
+            )
         parts = [tag, f"DECISION:\n{e['decision']}"]
+        for r in reviews:
+            parts.append(
+                f"INTERIM REVIEW at {r['days']}d "
+                f"(raw {r['raw']} | alpha {r['alpha']}):\n{r['note']}"
+            )
         if e["reflection"]:
             parts.append(f"REFLECTION:\n{e['reflection']}")
         return "\n\n".join(parts)
 
     def _format_reflection_only(self, e: dict) -> str:
+        reviews = e.get("reviews", ())
+        if e.get("pending") and reviews:
+            latest = reviews[-1]
+            tag = (
+                f"[{e['date']} | {e['ticker']} | {e['rating']} | "
+                f"in progress, {latest['days']}d {latest['raw']}]"
+            )
+            return f"{tag}\n{latest['note']}"
         tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {e['raw'] or 'n/a'}]"
         if e["reflection"]:
             return f"{tag}\n{e['reflection']}"
