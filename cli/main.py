@@ -1546,3 +1546,75 @@ def backtest(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def screen(
+    mandate: str = typer.Option(
+        ..., "--mandate", help="Investment mandate to screen for, e.g. equity_value"
+    ),
+    date: str = typer.Option(
+        None, "--date", help="As-of date, YYYY-MM-DD. Defaults to today."
+    ),
+    picks: int = typer.Option(8, "--picks", help="How many names to shortlist."),
+    controls: int = typer.Option(
+        3, "--controls",
+        help="Random control names drawn from the eligible pool the ranking did "
+             "not pick. Run these through the loop too: they are the only way to "
+             "tell whether the ordering beats picking eligible names at random.",
+    ),
+    budget: int = typer.Option(
+        60, "--budget",
+        help="How many price-tier survivors pay for a fundamentals call. The cut "
+             "into that tier is by liquidity, which is neutral to every mandate.",
+    ),
+    universe_limit: int = typer.Option(
+        None, "--universe-limit",
+        help="Cap the universe for a quick end-to-end run (alphabetical, so it "
+             "is reproducible). Not a sampling strategy.",
+    ),
+    seed: int = typer.Option(
+        None, "--seed", help="Control-group seed; omit for a fresh draw."
+    ),
+    show_excluded: bool = typer.Option(
+        False, "--show-excluded", help="Append the full exclusion list to the report."
+    ),
+):
+    """Find candidates for the analyst loop, without spending an LLM call."""
+    from tradingagents.screener import run_screen, save_manifest
+    from tradingagents.screener.review import render_screen
+
+    as_of = date or datetime.datetime.now().strftime("%Y-%m-%d")
+    console.print(f"[cyan]Screening for {mandate} as of {as_of}…[/cyan]")
+    try:
+        result = run_screen(
+            mandate, as_of, DEFAULT_CONFIG, picks=picks, controls=controls,
+            fundamental_budget=budget, universe_limit=universe_limit, control_seed=seed,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+
+    path = save_manifest(result.manifest, DEFAULT_CONFIG)
+    console.print(Markdown(
+        render_screen(result.manifest, result.excluded if show_excluded else None)
+    ))
+    console.print(f"\n[dim]Manifest: {path}[/dim]")
+    if result.manifest.picks:
+        names = ",".join(result.manifest.pick_symbols + result.manifest.control_symbols)
+        console.print(
+            f"[dim]Run the shortlist and its control through the loop:[/dim]\n"
+            f"  tradingagents backtest {names} --start {as_of} --end {as_of}"
+        )
+
+
+@app.command(name="screen-review")
+def screen_review(
+    mandate: str = typer.Option(
+        None, "--mandate", help="Limit to one mandate; omit for all."
+    ),
+):
+    """Show whether the screen's shortlists actually beat their controls."""
+    from tradingagents.screener.review import render_performance
+
+    console.print(Markdown(render_performance(DEFAULT_CONFIG, mandate)))
