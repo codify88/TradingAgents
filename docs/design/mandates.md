@@ -201,4 +201,24 @@ they no longer re-derive ratios or quote historical ranges from memory -- the
 P1 KO run asserted a "normal 20-22x" P/E band for KO; the computed ten-year
 range is 23x to 32x.
 
-**Not yet started.** P3 (momentum), P4 (screener).
+**P3 is landed.** `equity_momentum` runs a Momentum Analyst and a Growth
+Analyst on computed evidence: trailing and excess returns against SPY and the
+sector ETF, 12-1 momentum, trend structure, volume confirmation, invalidation
+levels priced in ATRs, growth acceleration, and estimate-revision breadth from
+`EARNINGS_ESTIMATES`. Its risk debate is framed around the trend breaking
+rather than permanent capital loss, and a drawdown is evidence against the
+thesis rather than an opportunity to add.
+
+The split between the two analysts is load-bearing rather than tidy: price and
+fundamental momentum disagreeing is itself a screen this mandate runs, so
+neither analyst can see the other's tools and reconcile it before the debate
+hears it.
+
+**Upstream v0.5.0 is merged** (57 commits). Where upstream built the same thing
+we did, theirs wins and ours layers on -- `holding_period_days` is now the
+no-mandate grading window, with a mandate's horizon overriding it. Upstream
+also shipped things adjacent to this plan: `run_backtest` over a ticker/date
+grid, `propagate(..., portfolio=...)`, and an SEC EDGAR fundamentals vendor.
+
+**Not yet started.** P4 (screener). Upstream's backtest harness is likely the
+right base for validating a mandate rather than a second implementation.
