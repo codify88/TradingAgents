@@ -278,6 +278,62 @@ def overview(ticker: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+@functools.lru_cache(maxsize=512)
+def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
+    """As :func:`alpha_vantage_daily`, but a vendor failure raises.
+
+    Only answers are cached -- "this symbol has no history" included. A rate
+    limit or network error propagates (lru_cache never memoises an exception),
+    so one throttled call cannot become a permanent "no data" for the rest of
+    the process. Callers that can retry, or that must tell an outage from a
+    dead company, use this.
+    """
+    import csv
+    import io
+
+    body = _make_api_request(
+        "TIME_SERIES_DAILY_ADJUSTED",
+        {"symbol": symbol.strip().upper(), "outputsize": "full", "datatype": "csv"},
+    )
+    if not isinstance(body, str) or body.lstrip().startswith("{"):
+        return pd.DataFrame()  # a JSON body here is "no such symbol", an answer
+    rows = list(csv.DictReader(io.StringIO(body)))
+    if not rows or "adjusted_close" not in rows[0]:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows).set_index("timestamp")
+    frame.index = pd.to_datetime(frame.index)
+    raw = frame[["open", "high", "low", "close", "adjusted_close", "volume"]].astype(float)
+    factor = raw["adjusted_close"] / raw["close"].where(raw["close"] > 0)
+    out = pd.DataFrame({
+        "Open": raw["open"] * factor,
+        "High": raw["high"] * factor,
+        "Low": raw["low"] * factor,
+        "Close": raw["adjusted_close"],
+        "Volume": raw["volume"],
+    })
+    return out.dropna(subset=["Close"]).sort_index()
+
+
+def alpha_vantage_daily(symbol: str) -> pd.DataFrame:
+    """Full daily history from Alpha Vantage, shaped like a yfinance auto-adjusted frame.
+
+    The reason it exists: Yahoo drops a ticker's history once it delists, so any
+    historical question about a company that no longer trades -- was it in the
+    universe then, what did it return, how did the call on it turn out -- gets
+    no answer, and the survivors are all that is left to study. Alpha Vantage
+    keeps the history (Atlas Air through its 2023 take-private, for one).
+
+    Columns Open/High/Low/Close/Volume, prices dividend- and split-adjusted by the
+    ratio of adjusted to raw close, so it is interchangeable with what the
+    screener and the grader read from yfinance. Empty on any failure, and a
+    failure is not cached, so the next call tries again.
+    """
+    try:
+        return alpha_vantage_daily_strict(symbol)
+    except Exception:
+        return pd.DataFrame()
+
+
 def close_on_or_before(prices: pd.Series, when: pd.Timestamp) -> tuple[pd.Timestamp, float] | None:
     """The last close at or before ``when`` (within a week), or None."""
     window = prices[(prices.index <= when) & (prices.index > when - pd.Timedelta(days=7))]

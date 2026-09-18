@@ -309,7 +309,7 @@ history; `equity_momentum` → 12-month excess total return over SPY.
 | Flag | Default | Use |
 |---|---|---|
 | `--mandate` | required | `equity_value` or `equity_momentum` |
-| `--date` | today | as-of date (see the [survivorship caveat](#caveats-and-troubleshooting)) |
+| `--date` | today | as-of date (historical listings back to 2010; see [survivorship](#caveats-and-troubleshooting)) |
 | `--picks` | 8 | shortlist size |
 | `--controls` | 3 | random controls; raise it for a sharper comparison |
 | `--budget` | 60 | how many price-tier survivors get fundamentals calls |
@@ -482,8 +482,8 @@ tradingagents screen-review --mandate equity_momentum
 ```
 
 Momentum settles after six months, so every date above is scorable today. Read
-the [survivorship caveat](#caveats-and-troubleshooting) first: the edge column
-is informative; the absolute returns are flattered.
+the **Survivorship** line each screen prints: it counts the delisted names the
+fundamentals tier could not examine, which is the bias that remains.
 
 ### 3. The same name under both mandates
 
@@ -626,11 +626,19 @@ name as unavailable.
 
 ## Caveats and troubleshooting
 
-**Historical screens are survivorship-biased.** The universe is today's active
-listings, even with `--date` in the past: a company listed then but delisted
-since cannot appear. Absolute returns of a historical screen are flattered. The
-picks-vs-control **edge** is much less affected, because both arms are drawn from
-the same surviving pool — which is the comparison `screen-review` is built on.
+**Historical screens: survivorship is fixed in three places, counted in the
+fourth.** A past `--date` builds the universe from the listings active *on that
+date*, so companies acquired, taken private or bankrupt since are included and
+marked. Yahoo has no history for them, so their prices come from Alpha Vantage,
+and grading does the same: a name that stopped trading inside its horizon
+settles at its last trade (Atlas Air, a 2022-06-01 call, settles at its
+2023-04-03 take-private) instead of staying pending forever. The one stage that
+cannot be fixed is fundamentals: Alpha Vantage keeps no statements for delisted
+companies, so they are excluded there with that reason stated, and the screen
+prints a **Survivorship** line counting how many were lost at each tier. Read it
+before trusting a historical screen's absolute returns; the picks-vs-control edge
+is much less exposed, since both arms come from the same pool. Historical
+listings go back to 2010-01-01.
 
 **A value backtest on recent dates looks empty.** It is not broken: cells settle
 504 trading days after their date. See the horizon table above, and read the

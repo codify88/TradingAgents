@@ -234,8 +234,14 @@ def run_screen(
 
     universe = load_universe(as_of, limit=universe_limit)
     tiers.append(TierStat("universe", examined=len(universe), kept=len(universe)))
+    delisted = {c.symbol for c in universe if c.delisted_since}
 
-    price_data = prices.download([c.symbol for c in universe], start, end)
+    # One limiter for every Alpha Vantage call the screen makes: the price
+    # fallback for delisted names and the fundamentals tier share one budget.
+    limiter = RateLimiter(requests_per_minute)
+    price_data = prices.download(
+        [c.symbol for c in universe], start, end, fallback=delisted, limiter=limiter,
+    )
     frames = price_data.frames
     bench = prices.download([BENCHMARK], start, end).frames.get(BENCHMARK, pd.DataFrame())
 
@@ -282,9 +288,14 @@ def run_screen(
     reasons = Counter()
     eligible: list[str] = []
     ordering: dict[str, float] = {}
-    limiter = RateLimiter(requests_per_minute)
+    lost_to_statements: list[str] = []
     for symbol in examined:
         rules, value = fundamental_exclusions(mandate, symbol, as_of, frames[symbol], limiter)
+        if rules and symbol in delisted and rules[0].startswith("fundamentals unavailable"):
+            # Say what this is: not a fact about the company, but the vendor
+            # keeping no statements once a company delists.
+            rules = [DELISTED_NO_STATEMENTS]
+            lost_to_statements.append(symbol)
         if rules:
             excluded[symbol] = rules
             reasons[rules[0]] += 1
@@ -312,6 +323,8 @@ def run_screen(
 
     signal = VALUE_ORDERING if (mandate and mandate.name == "equity_value") else MOMENTUM_ORDERING
     notes = []
+    if delisted:
+        notes.append(survivorship_note(delisted, survivors, examined, lost_to_statements, eligible))
 
     if not usable:
         # The funnel is still reported, so the failure is visible rather than
@@ -356,6 +369,34 @@ def run_screen(
     )
     return ScreenResult(
         manifest=manifest, eligible=eligible, excluded=excluded, usable=usable,
+    )
+
+
+DELISTED_NO_STATEMENTS = (
+    "delisted since the screen date; Alpha Vantage keeps no statements for "
+    "delisted companies, so the fundamental screens cannot run"
+)
+
+
+def survivorship_note(delisted: set[str], price_survivors: list[str],
+                      examined: list[str], lost: list[str], eligible: list[str]) -> str:
+    """How far the names that have since delisted got, stated in the report.
+
+    The universe and price tiers now see them; the fundamentals tier cannot,
+    because the statements vendor drops a company when it delists. Rather than
+    let that quietly re-create a survivors-only shortlist, the loss is counted
+    here so the reader can judge how much it matters for this screen.
+    """
+    past_price = len(delisted & set(price_survivors))
+    reached = len(delisted & set(examined))
+    kept = len(delisted & set(eligible))
+    return (
+        f"Survivorship: {len(delisted):,} names in this universe have delisted since "
+        f"the screen date. {past_price:,} passed the price tier, {reached:,} reached "
+        f"the fundamentals tier, and {len(lost):,} of those were excluded there only "
+        f"because no statements survive for delisted companies; {kept:,} remain "
+        f"eligible. The universe and price tiers are free of survivorship bias; the "
+        f"fundamentals tier is not, by that count."
     )
 
 

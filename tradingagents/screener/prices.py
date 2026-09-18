@@ -65,7 +65,8 @@ class PriceData:
 
 def download(
     symbols: list[str], start: str, end: str, batch_size: int = BATCH_SIZE,
-    attempts: int = 3,
+    attempts: int = 3, fallback: frozenset[str] | set[str] = frozenset(),
+    limiter=None,
 ) -> PriceData:
     """OHLCV per symbol, dividend-adjusted, with vendor failures reported.
 
@@ -73,6 +74,13 @@ def download(
     treated as a vendor failure and retried with backoff before its symbols are
     marked unavailable. A batch that returns data for some symbols and not
     others is believed: those others really have no history.
+
+    ``fallback`` names symbols to fetch from Alpha Vantage when Yahoo has
+    nothing for them. The caller passes the names that have delisted since the
+    screen date: Yahoo drops a ticker's history when it delists, so without
+    this every one of them would be excluded as "no price history" and a
+    historical screen would see only survivors. It is limited to those names so
+    a live screen pays nothing extra for the genuinely dead.
     """
     import yfinance as yf
 
@@ -114,6 +122,29 @@ def download(
             if getattr(frame.index, "tz", None) is not None:
                 frame.index = frame.index.tz_localize(None)
             data.frames[symbol] = frame.sort_index()
+
+    missing = [s for s in symbols if s in fallback
+               and s not in data.frames and s not in data.unavailable]
+    if missing:
+        from tradingagents.mandates.tools.financials import alpha_vantage_daily_strict
+
+        from .throttle import with_retry
+
+        lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+        for symbol in missing:
+            if limiter is not None:
+                limiter.acquire(1)
+            try:
+                frame = with_retry(lambda s=symbol: alpha_vantage_daily_strict(s))
+            except Exception as exc:
+                # Still failing after retries is the vendor, not the company:
+                # report it as unavailable rather than as "no price history".
+                logger.warning("delisted-name price fallback failed for %s: %s", symbol, exc)
+                data.unavailable.add(symbol)
+                continue
+            frame = frame[(frame.index >= lo) & (frame.index < hi)] if not frame.empty else frame
+            if not frame.empty:
+                data.frames[symbol] = frame
     return data
 
 

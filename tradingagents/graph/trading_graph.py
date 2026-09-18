@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
@@ -89,6 +90,14 @@ def _coerce_max_tokens(value):
     if n <= 0:
         raise ValueError(f"max_tokens must be > 0, got {n}")
     return n
+
+
+def _tz_naive(frame):
+    """Drop the timezone from a price frame's index, so vendors compare cleanly."""
+    if getattr(frame.index, "tz", None) is not None:
+        frame = frame.copy()
+        frame.index = frame.index.tz_localize(None)
+    return frame
 
 
 class TradingAgentsGraph:
@@ -378,6 +387,11 @@ class TradingAgentsGraph:
         """
         return int(trading_days * 1.5) + 10
 
+    # A stock whose last bar is this many calendar days older than the
+    # benchmark's has stopped trading. Two weeks cannot be a late print: a
+    # vendor that is merely behind is behind on the benchmark too.
+    DELISTED_GAP_DAYS = 14
+
     @staticmethod
     def _returns_at_horizons(
         ticker: str, trade_date: str, horizons, benchmark: str = "SPY",
@@ -388,6 +402,15 @@ class TradingAgentsGraph:
         checkpoints costs the same two requests as checking one. Horizons whose
         full window has not traded yet are simply absent from the result (#1169),
         as are all of them when the symbol is unreachable.
+
+        Delisted names are graded, not abandoned. Yahoo drops a ticker's history
+        when it delists, so the series comes from Alpha Vantage instead; and a
+        name that stopped trading inside the horizon -- acquired, taken private,
+        bankrupt -- settles at its last trade once the benchmark shows the
+        horizon has passed, with that last trade's date as the resolution date.
+        Without both, every decision on a company that later disappeared would
+        stay pending forever, and any aggregate over the log would be computed on
+        survivors alone.
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
 
@@ -404,13 +427,37 @@ class TradingAgentsGraph:
             # already a canonical Yahoo symbol from ``_resolve_benchmark``.
             stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
             bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+            if stock.empty:
+                from tradingagents.mandates.tools.financials import alpha_vantage_daily
+
+                full = alpha_vantage_daily(ticker)
+                if not full.empty:
+                    stock = full[(full.index >= pd.Timestamp(trade_date))
+                                 & (full.index < pd.Timestamp(end_str))]
+            stock, bench = _tz_naive(stock), _tz_naive(bench)
+            delisted = (
+                not stock.empty and not bench.empty
+                and (bench.index[-1] - stock.index[-1]).days
+                >= TradingAgentsGraph.DELISTED_GAP_DAYS
+            )
 
             settled = {}
             for days in horizons:
                 # Require the full window in both series. A rerun before it has
                 # traded leaves the horizon unsettled to retry next run, rather
-                # than settling on a premature partial return (#1169).
-                if len(stock) <= days or len(bench) <= days:
+                # than settling on a premature partial return (#1169). The one
+                # exception is a stock that has stopped trading: its window will
+                # never fill, so once the benchmark's has, it settles at its last
+                # trade.
+                if len(bench) <= days:
+                    continue
+                if len(stock) <= days:
+                    if delisted:
+                        last = stock.index[-1]
+                        raw = float(stock["Close"].iloc[-1] / stock["Close"].iloc[0] - 1)
+                        bench_at = bench["Close"][bench.index <= last]
+                        bench_ret = float(bench_at.iloc[-1] / bench["Close"].iloc[0] - 1)
+                        settled[days] = (raw, raw - bench_ret, last.strftime("%Y-%m-%d"))
                     continue
                 raw = float(
                     (stock["Close"].iloc[days] - stock["Close"].iloc[0])

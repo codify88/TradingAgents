@@ -231,6 +231,12 @@ wrong when it happened because the analysis improved -- the log kept teaching,
 and would eventually grade, the decision that had been replaced. `--supersede`
 retires the old entry (marked, not deleted) and records the new one.
 
+**Historical screens see the dead.** Listings as of the screen date, Alpha
+Vantage prices for names Yahoo has dropped, and grading that settles a
+delisted-mid-horizon name at its last trade. Fundamentals for delisted
+companies remain unavailable and are counted in each screen's notes. See
+`docs/design/screener.md`.
+
 **Still open.** Tier 3 is manual: the screen prints the `backtest` command to
 run its shortlist and control through the loop, but nothing runs it for you.
 Wiring that up is the obvious next step, and upstream's `run_backtest` already

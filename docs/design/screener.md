@@ -65,6 +65,24 @@ reports picks against controls. It refuses a verdict until both arms settle:
 picks returning well while no control has settled is a statement about the
 market over that window, not about the screen.
 
+## Survivorship
+
+A screen dated in the past has to see the companies that have since died, or its
+history is a study of survivors. Four places could drop them:
+
+| Stage | Problem | Now |
+|---|---|---|
+| universe | today's listings exclude everything delisted since | listings as of the screen date (`LISTING_STATUS date=`); gone-since names are marked |
+| price | Yahoo drops a ticker's history when it delists | marked names fall back to Alpha Vantage, which keeps it |
+| fundamentals | Alpha Vantage returns empty statements for delisted companies | **not fixable here**: excluded with that reason, and counted |
+| grading | no prices, so the decision never settles | Alpha Vantage prices; a name delisted mid-horizon settles at its last trade |
+
+The fundamentals gap is stated in every historical screen's notes -- how many
+names delisted since, how many reached the fundamentals tier, how many were lost
+there -- so the remaining bias is a number in the report, not an assumption. SEC
+EDGAR keeps delisted filers' statements, but resolving a dead ticker to its
+filer needs a historical ticker map that EDGAR's public API does not provide.
+
 ## When not to believe it
 
 A vendor outage and a dead company look identical in a dict of price frames.
