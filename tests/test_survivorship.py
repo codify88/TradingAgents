@@ -181,10 +181,10 @@ class TestSurvivorshipNote:
         assert "4 names in this universe have delisted since" in note
         assert "3 passed the price tier, 2 reached the fundamentals tier" in note
         assert "2 of those were excluded there only because no statements survive" in note
-        assert "the fundamentals tier is not" in note
+        assert "What survivorship bias remains is that count" in note
 
     def test_a_delisted_name_without_statements_says_why(self):
-        assert "Alpha Vantage keeps no statements for delisted companies" in screen.DELISTED_NO_STATEMENTS
+        assert "EDGAR had no single US-GAAP filer" in screen.DELISTED_NO_STATEMENTS
 
 
 # --- grading: decisions on dead companies settle ------------------------------------------

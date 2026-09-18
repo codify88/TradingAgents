@@ -87,14 +87,24 @@ history is a study of survivors. Four places could drop them:
 |---|---|---|
 | universe | today's listings exclude everything delisted since | listings as of the screen date (`LISTING_STATUS date=`); gone-since names are marked |
 | price | Yahoo drops a ticker's history when it delists | marked names fall back to Alpha Vantage, which keeps it |
-| fundamentals | Alpha Vantage returns empty statements for delisted companies | **not fixable here**: excluded with that reason, and counted |
+| fundamentals | Alpha Vantage returns empty statements for delisted companies | read from SEC EDGAR; what EDGAR cannot answer (IFRS filers, ambiguous names) is excluded with that reason, and counted |
 | grading | no prices, so the decision never settles | Alpha Vantage prices; a name delisted mid-horizon settles at its last trade |
 
-The fundamentals gap is stated in every historical screen's notes -- how many
-names delisted since, how many reached the fundamentals tier, how many were lost
-there -- so the remaining bias is a number in the report, not an assumption. SEC
-EDGAR keeps delisted filers' statements, but resolving a dead ticker to its
-filer needs a historical ticker map that EDGAR's public API does not provide.
+Fundamentals for a delisted company come from SEC EDGAR (`mandates/tools/edgar.py`).
+EDGAR maps only current tickers, so the company's name -- from Alpha Vantage's
+delisted listing, with dates so a reused ticker resolves correctly -- is matched
+against every name that has ever filed, and only a single filer that was filing
+10-Ks or 10-Qs around the screen date is accepted; anything else is no data,
+never a guess. Facts are admitted from the day they were filed, restatements
+included, and year-to-date quarterly cash flows are converted to single quarters.
+Validated against Coca-Cola, where both sources exist: margins, ROE, FCF
+conversion and interest coverage match exactly, ROIC within half a point. A
+2022-03-01 value screen over 400 names lost none of its 14 delisted candidates to
+missing statements.
+
+Still unrecoverable: IFRS filers (no US-GAAP facts), names that match no single
+filer, and analyst estimate revisions, which are not filed. Every historical
+screen counts what remains in its Survivorship note.
 
 ## When not to believe it
 

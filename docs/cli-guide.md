@@ -632,19 +632,15 @@ name as unavailable.
 
 ## Caveats and troubleshooting
 
-**Historical screens: survivorship is fixed in three places, counted in the
-fourth.** A past `--date` builds the universe from the listings active *on that
-date*, so companies acquired, taken private or bankrupt since are included and
-marked. Yahoo has no history for them, so their prices come from Alpha Vantage,
-and grading does the same: a name that stopped trading inside its horizon
-settles at its last trade (Atlas Air, a 2022-06-01 call, settles at its
-2023-04-03 take-private) instead of staying pending forever. The one stage that
-cannot be fixed is fundamentals: Alpha Vantage keeps no statements for delisted
-companies, so they are excluded there with that reason stated, and the screen
-prints a **Survivorship** line counting how many were lost at each tier. Read it
-before trusting a historical screen's absolute returns; the picks-vs-control edge
-is much less exposed, since both arms come from the same pool. Historical
-listings go back to 2010-01-01.
+**Historical screens see companies that later died.** A past `--date` uses the
+listings active on that date (back to 2010-01-01); Yahoo has no history for
+delisted names, so their prices come from Alpha Vantage; Alpha Vantage drops their
+statements, so those come from SEC EDGAR; and grading settles a name that stopped
+trading mid-horizon at its last trade. What EDGAR cannot answer -- IFRS filers,
+names matching no single filer -- is counted in the **Survivorship** line each
+historical screen prints. EDGAR requires `SEC_EDGAR_USER_AGENT` in `.env` (a name
+and contact email). Estimate revisions are not filed, so the momentum Growth
+analyst's revision signal stays NO DATA for delisted names.
 
 **A value backtest on recent dates looks empty.** It is not broken: cells settle
 504 trading days after their date. See the horizon table above, and read the

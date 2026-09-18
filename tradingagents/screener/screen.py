@@ -373,8 +373,8 @@ def run_screen(
 
 
 DELISTED_NO_STATEMENTS = (
-    "delisted since the screen date; Alpha Vantage keeps no statements for "
-    "delisted companies, so the fundamental screens cannot run"
+    "delisted since the screen date, and no statements survive: Alpha Vantage "
+    "drops them, and EDGAR had no single US-GAAP filer to match the name to"
 )
 
 
@@ -382,10 +382,11 @@ def survivorship_note(delisted: set[str], price_survivors: list[str],
                       examined: list[str], lost: list[str], eligible: list[str]) -> str:
     """How far the names that have since delisted got, stated in the report.
 
-    The universe and price tiers now see them; the fundamentals tier cannot,
-    because the statements vendor drops a company when it delists. Rather than
-    let that quietly re-create a survivors-only shortlist, the loss is counted
-    here so the reader can judge how much it matters for this screen.
+    Every tier now sees them, the fundamentals tier through SEC EDGAR once
+    Alpha Vantage has dropped a company's statements. EDGAR cannot answer for
+    all of them -- an IFRS filer, or a name that matches no single filer -- so
+    what is still lost is counted here, and the reader can judge how much it
+    matters for this screen.
     """
     past_price = len(delisted & set(price_survivors))
     reached = len(delisted & set(examined))
@@ -394,9 +395,9 @@ def survivorship_note(delisted: set[str], price_survivors: list[str],
         f"Survivorship: {len(delisted):,} names in this universe have delisted since "
         f"the screen date. {past_price:,} passed the price tier, {reached:,} reached "
         f"the fundamentals tier, and {len(lost):,} of those were excluded there only "
-        f"because no statements survive for delisted companies; {kept:,} remain "
-        f"eligible. The universe and price tiers are free of survivorship bias; the "
-        f"fundamentals tier is not, by that count."
+        f"because no statements survive (Alpha Vantage drops them; EDGAR had no single "
+        f"US-GAAP filer to match); {kept:,} remain eligible. What survivorship bias "
+        f"remains is that count."
     )
 
 

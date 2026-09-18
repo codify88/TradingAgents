@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 from dataclasses import dataclass
 
 import pandas as pd
 
 from tradingagents.dataflows.alpha_vantage_common import _make_api_request
+
+logger = logging.getLogger(__name__)
 
 STATEMENTS = ("INCOME_STATEMENT", "BALANCE_SHEET", "CASH_FLOW")
 
@@ -166,9 +169,29 @@ def _known_dates(index: pd.DatetimeIndex, reported: dict[str, str], lag_days: in
 def load_financials(ticker: str, as_of: str) -> Financials:
     """Every statement Alpha Vantage has for ``ticker``, as known on ``as_of``.
 
-    Raises FinancialsUnavailable when nothing usable exists by that date; vendor
-    errors (missing key, rate limit) propagate so the caller can report them.
+    When Alpha Vantage has nothing -- it drops a company's statements once it
+    delists -- the filings are read from SEC EDGAR instead (see ``edgar.py``),
+    so a historical question about a company that later disappeared gets an
+    answer rather than a survivors-only silence. Raises FinancialsUnavailable
+    when neither source has anything usable by that date; vendor errors
+    (missing key, rate limit) propagate so the caller can report them.
     """
+    try:
+        return _load_alpha_vantage(ticker, as_of)
+    except FinancialsUnavailable as av_gap:
+        from .edgar import load_delisted_financials
+
+        try:
+            return load_delisted_financials(ticker, as_of)
+        except FinancialsUnavailable:
+            raise av_gap from None
+        except Exception as exc:  # EDGAR down or unreadable: report Alpha Vantage's gap
+            logger.info("EDGAR fallback for %s failed: %s", ticker, exc)
+            raise av_gap from None
+
+
+def _load_alpha_vantage(ticker: str, as_of: str) -> Financials:
+    """Every statement Alpha Vantage has for ``ticker``, as known on ``as_of``."""
     symbol = ticker.strip().upper()
     cutoff = pd.Timestamp(as_of)
 
