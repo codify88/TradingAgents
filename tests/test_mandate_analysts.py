@@ -349,3 +349,65 @@ class TestCli:
         b.init_for_analysis(["market"])
         assert b.mandate_analysts == []
         assert not any(s.startswith("mandate:") for s in b.report_sections)
+
+
+# --- upstream preamble drift ----------------------------------------------
+
+
+def _upstream_preamble(module) -> str:
+    """The collaborative preamble as it stands in an upstream analyst module.
+
+    Upstream inlines the text in each analyst rather than exporting a constant,
+    so there is nothing to import. Adjacent string literals are folded by the
+    parser, so the AST yields the assembled preamble as one constant.
+    """
+    import ast
+    import inspect
+
+    found = [
+        node.value for node in ast.walk(ast.parse(inspect.getsource(module)))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        and "collaborating with other assistants" in node.value
+    ]
+    assert len(found) == 1, f"expected one preamble in {module.__name__}, got {len(found)}"
+    return found[0]
+
+
+class TestPreambleTracksUpstream:
+    """Our copy of the preamble is the one thing in mandates/ that can silently
+    drift from upstream, because it is a copy rather than an import.
+
+    v0.5.0 replaced the old "FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**"
+    instruction and our copy kept it, so all four mandate analysts went on being
+    told to announce a trade call. The suite did not notice, exactly as it did
+    not notice the two dropped hooks in the same merge.
+    """
+
+    def test_our_copy_is_identical_to_upstreams(self):
+        import tradingagents.agents.analysts.market_analyst as market
+        from tradingagents.mandates.analysts.base import _PREAMBLE
+
+        assert _upstream_preamble(market) == _PREAMBLE, (
+            "mandates/analysts/base.py::_PREAMBLE has drifted from the preamble in "
+            "market_analyst.py. Copy upstream's text across and check whether the "
+            "change also affects what the mandate analysts are told to produce."
+        )
+
+    def test_every_upstream_analyst_shares_that_preamble(self):
+        """If upstream ever gives one analyst its own preamble, matching only
+        the market analyst stops being a sufficient check."""
+        import tradingagents.agents.analysts.fundamentals_analyst as fundamentals
+        import tradingagents.agents.analysts.market_analyst as market
+        import tradingagents.agents.analysts.news_analyst as news
+
+        preambles = {_upstream_preamble(m) for m in (market, fundamentals, news)}
+        assert len(preambles) == 1, "upstream analysts no longer share one preamble"
+
+    def test_a_mandate_analyst_is_not_told_to_announce_a_trade(self):
+        """The behavioural point, independent of the exact wording: these
+        personas answer one part of the question and leave the call to the
+        debate."""
+        from tradingagents.mandates.analysts.base import _PREAMBLE
+
+        assert "FINAL TRANSACTION PROPOSAL" not in _PREAMBLE
+        assert "BUY/HOLD/SELL" not in _PREAMBLE

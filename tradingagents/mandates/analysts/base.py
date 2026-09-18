@@ -13,15 +13,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Same collaborative preamble every upstream analyst uses, so a mandate analyst
-# behaves identically in the tool loop.
+# Verbatim copy of the preamble every upstream analyst uses, so a mandate
+# analyst behaves identically in the tool loop. It has to be a copy -- upstream
+# inlines the text in each analyst module rather than exporting a constant --
+# which makes it a drift risk on every merge: v0.5.0 replaced the old
+# "FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**" instruction with the line
+# below, and this copy silently kept telling four mandate analysts to announce
+# a trade call. A Quality Analyst emitting BUY/HOLD/SELL is worse here than it
+# was upstream: these personas exist precisely to answer one part of the
+# question and leave the call to the debate.
+#
+# tests/test_mandate_analysts.py asserts this matches the text in
+# market_analyst.py, so the next upstream edit fails loudly instead.
 _PREAMBLE = (
     "You are a helpful AI assistant, collaborating with other assistants."
     " Use the provided tools to progress towards answering the question."
     " If you are unable to fully answer, that's OK; another assistant with different tools"
     " will help where you left off. Execute what you can to make progress."
-    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+    " Report what your tools support; another agent decides the trade."
     " You have access to the following tools: {tool_names}."
     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
     "{system_message}"
