@@ -91,6 +91,11 @@ def _bars(start="2021-01-04", n=300, price=50.0):
 
 class TestPriceFallback:
 
+    @pytest.fixture(autouse=True)
+    def _no_wait(self):
+        with patch("time.sleep"):
+            yield
+
     def test_a_delisted_name_is_priced_from_alpha_vantage(self):
         with patch("yfinance.download", side_effect=_yahoo({"AAA": _bars()})), \
              patch.object(fin, "alpha_vantage_daily_strict", return_value=_bars()) as av:
@@ -233,3 +238,41 @@ class TestGradingDelistedNames:
 
     def test_no_data_anywhere_settles_nothing(self):
         assert _grade(pd.DataFrame(), _series("2022-03-01", 10, 400, 0)) == {}
+
+
+# --- throttling inside a batch -------------------------------------------------------
+
+
+class TestSecondLook:
+    """Yahoo drops symbols from inside a batch when throttling; that is not a fact
+    about those companies. Live, it once excluded AEM and AGNC as 'no price history'."""
+
+    @pytest.fixture(autouse=True)
+    def _no_wait(self):
+        with patch("time.sleep"):
+            yield
+
+    def test_a_throttled_symbol_is_recovered(self):
+        answers = iter([_yahoo({"AAA": _bars()}), _yahoo({"AEM": _bars()})])
+        with patch("yfinance.download", side_effect=lambda batch, **kw: next(answers)(batch, **kw)) as dl:
+            data = prices.download(["AAA", "AEM"], "2021-01-01", "2022-03-02")
+        assert set(data.frames) == {"AAA", "AEM"}
+        assert dl.call_args_list[1].args[0] == ["AEM"], "only the missing symbols are re-asked"
+
+    def test_a_dead_symbol_is_believed_after_one_empty_look(self):
+        with patch("yfinance.download", side_effect=_yahoo({"AAA": _bars()})) as dl:
+            data = prices.download(["AAA", "DEAD"], "2021-01-01", "2022-03-02", attempts=3)
+        assert set(data.frames) == {"AAA"}
+        assert data.unavailable == set(), "a symbol Yahoo answers empty for twice has no history"
+        assert dl.call_count == 2, "a look that recovers nothing ends the looking"
+
+    def test_one_attempt_believes_the_first_answer(self):
+        with patch("yfinance.download", side_effect=_yahoo({"AAA": _bars()})) as dl:
+            prices.download(["AAA", "DEAD"], "2021-01-01", "2022-03-02", attempts=1)
+        assert dl.call_count == 1
+
+    def test_a_flat_frame_is_not_attributed_to_every_symbol(self):
+        """A single un-keyed frame for a multi-symbol ask cannot say whose it is."""
+        with patch("yfinance.download", return_value=_bars()):
+            data = prices.download(["AAA", "BBB"], "2021-01-01", "2022-03-02", attempts=1)
+        assert data.frames == {}

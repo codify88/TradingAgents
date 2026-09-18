@@ -73,7 +73,13 @@ def download(
     A batch that raises, or that comes back empty for every symbol in it, is
     treated as a vendor failure and retried with backoff before its symbols are
     marked unavailable. A batch that returns data for some symbols and not
-    others is believed: those others really have no history.
+    others gets a second look at the missing ones before they are believed:
+    Yahoo throttles *within* a batch too, answering for most symbols and
+    silently dropping a few, and taking that at face value once excluded
+    Agnico Eagle and AGNC as "no price history". Symbols still missing when a
+    look recovers nothing are believed -- a dead ticker is empty every time.
+    The looks share the ``attempts`` budget, so ``attempts=1`` believes the
+    first answer.
 
     ``fallback`` names symbols to fetch from Alpha Vantage when Yahoo has
     nothing for them. The caller passes the names that have delisted since the
@@ -111,17 +117,32 @@ def download(
             data.unavailable.update(batch)
             continue
 
-        for symbol in batch:
+        _extract(raw, batch, data)
+
+        # A second look at what a partial answer left out: throttling drops
+        # symbols from inside a batch, and a transient gap must not be recorded
+        # as a fact about the company. Stop as soon as a look recovers nothing.
+        missing = [s for s in batch if s not in data.frames]
+        for look in range(attempts - 1):
+            if not missing:
+                break
+            time.sleep(2.0 * (look + 1))
             try:
-                frame = raw[symbol] if isinstance(raw.columns, pd.MultiIndex) else raw
-            except KeyError:
-                continue
-            frame = frame.dropna(how="all")
-            if frame.empty or "Close" not in frame:
-                continue
-            if getattr(frame.index, "tz", None) is not None:
-                frame.index = frame.index.tz_localize(None)
-            data.frames[symbol] = frame.sort_index()
+                with _quiet():
+                    again = yf.download(
+                        missing, start=start, end=end, auto_adjust=True, progress=False,
+                        group_by="ticker", threads=True,
+                    )
+            except Exception as exc:
+                logger.warning("second look at %d symbols failed: %s", len(missing), exc)
+                break
+            if again is None or again.empty:
+                break
+            before = len(data.frames)
+            _extract(again, missing, data)
+            if len(data.frames) == before:
+                break
+            missing = [s for s in missing if s not in data.frames]
 
     missing = [s for s in symbols if s in fallback
                and s not in data.frames and s not in data.unavailable]
@@ -146,6 +167,26 @@ def download(
             if not frame.empty:
                 data.frames[symbol] = frame
     return data
+
+
+def _extract(raw: pd.DataFrame, symbols: list[str], data: PriceData) -> None:
+    """Pull each symbol's frame out of a (multi-symbol) yfinance download."""
+    for symbol in symbols:
+        try:
+            if isinstance(raw.columns, pd.MultiIndex):
+                frame = raw[symbol]
+            elif len(symbols) == 1:
+                frame = raw
+            else:
+                continue  # a flat frame for a multi-symbol ask cannot be attributed
+        except KeyError:
+            continue
+        frame = frame.dropna(how="all")
+        if frame.empty or "Close" not in frame:
+            continue
+        if getattr(frame.index, "tz", None) is not None:
+            frame.index = frame.index.tz_localize(None)
+        data.frames[symbol] = frame.sort_index()
 
 
 def dollar_volume(frame: pd.DataFrame, days: int = 63) -> float:
