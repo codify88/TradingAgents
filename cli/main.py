@@ -1114,7 +1114,7 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     return config
 
 
-def run_analysis(checkpoint: bool | None = None, portfolio=None):
+def run_analysis(checkpoint: bool | None = None, portfolio=None, supersede: bool = False):
     # First get all user selections
     selections = get_user_selections()
 
@@ -1368,7 +1368,9 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None):
             # Clean run: log the decision, then drop this run's checkpoint so a
             # later run starts fresh. A mid-stream failure skips both, keeping
             # the checkpoint for resume.
-            graph.record_decision(selections["ticker"], selections["analysis_date"], final_state)
+            graph.record_decision(
+                selections["ticker"], selections["analysis_date"], final_state, supersede
+            )
             graph.clear_checkpoint_on_success(
                 selections["ticker"], selections["analysis_date"], selections["asset_type"], portfolio
             )
@@ -1446,6 +1448,14 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
+    supersede: bool = typer.Option(
+        False,
+        "--supersede",
+        help="Replace an existing decision-log entry for this ticker, date and "
+        "mandate instead of leaving the run unrecorded. Use it when you are "
+        "re-running because the analysis improved, so the log teaches and "
+        "grades the new decision rather than the one it replaced.",
+    ),
     portfolio: str = typer.Option(
         None,
         "--portfolio",
@@ -1470,7 +1480,8 @@ def analyze(
             raise typer.Exit(code=1) from None
 
     try:
-        run_analysis(checkpoint=checkpoint, portfolio=portfolio_context)
+        run_analysis(checkpoint=checkpoint, portfolio=portfolio_context,
+                     supersede=supersede)
     except _NO_CONSOLE_ERRORS:
         # A terminal with no console buffer cannot host the interactive prompts.
         # Emit one actionable line on stderr instead of a prompt_toolkit

@@ -1,6 +1,7 @@
 """Append-only markdown decision log for TradingAgents."""
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from tradingagents.agents.utils.rating import parse_rating
@@ -43,15 +44,26 @@ class TradingMemoryLog:
         trade_date: str,
         final_trade_decision: str,
         mandate: str = "",
-    ) -> None:
+        supersede: bool = False,
+    ) -> bool:
         """Append pending entry at end of propagate(). No LLM call.
 
         ``mandate`` is recorded on the tag so the deferred outcome resolution
         grades this decision on the horizon it was actually made for, even if
         the next run of the same ticker uses a different mandate.
+
+        ``supersede`` retires an existing entry for the same ticker, date and
+        mandate and records this one in its place. Without it a re-run is
+        silently dropped, which is right when the re-run is incidental and
+        wrong when it happened *because the analysis improved*: the log would
+        keep teaching, and eventually grade, the decision that has been
+        superseded. The old entry is marked rather than deleted, so the log
+        remains an honest record of what was decided and when.
+
+        Returns True when an entry was written.
         """
         if not self._log_path:
-            return
+            return False
         # Idempotency guard: fast raw-text scan instead of full parse. Any entry
         # for this ticker and date blocks another, pending or settled: a re-run
         # after the outcome landed would otherwise count the same decision twice
@@ -67,7 +79,10 @@ class TradingMemoryLog:
                 # genuinely different decision -- different horizon, different
                 # framing -- and gets its own entry.
                 if self._tag_mandate(line.strip(), prefix) == mandate:
-                    return
+                    if not supersede:
+                        return False
+                    self._mark_superseded(trade_date, ticker, mandate)
+                    break
         rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending"
         if mandate:
@@ -76,6 +91,38 @@ class TradingMemoryLog:
         entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
+        return True
+
+    def _mark_superseded(self, trade_date: str, ticker: str, mandate: str) -> None:
+        """Tag every live entry for this ticker/date/mandate as superseded.
+
+        Atomic temp-file write, like the outcome updates: a crash mid-write must
+        not leave the log holding two live entries for one decision.
+        """
+        text = self._log_path.read_text(encoding="utf-8")
+        prefix = f"[{trade_date} | {ticker} |"
+        stamp = datetime.now().strftime("%Y-%m-%d")
+
+        blocks = []
+        for block in text.split(self._SEPARATOR):
+            stripped = block.strip()
+            if not stripped:
+                blocks.append(block)
+                continue
+            lines = stripped.splitlines()
+            tag_line = lines[0].strip()
+            if (
+                self._tag_mandate(tag_line, prefix) == mandate
+                and "superseded:" not in tag_line
+            ):
+                new_tag = f"{tag_line[:-1]} | superseded:{stamp}]"
+                blocks.append("\n".join([new_tag, *lines[1:]]))
+            else:
+                blocks.append(block)
+
+        tmp_path = self._log_path.with_suffix(".tmp")
+        tmp_path.write_text(self._SEPARATOR.join(blocks), encoding="utf-8")
+        tmp_path.replace(self._log_path)
 
     # --- Read path (Phase A) ---
 
@@ -93,8 +140,16 @@ class TradingMemoryLog:
         return entries
 
     def get_pending_entries(self) -> list[dict]:
-        """Return entries with outcome:pending (for Phase B)."""
-        return [e for e in self.load_entries() if e.get("pending")]
+        """Return unsettled entries still awaiting an outcome (for Phase B).
+
+        Superseded entries are excluded: spending a price lookup and a
+        reflection call to grade a decision that has been replaced would put
+        the retired analysis back into the lessons it was retired from.
+        """
+        return [
+            e for e in self.load_entries()
+            if e.get("pending") and not e.get("superseded")
+        ]
 
     def get_past_context(
         self, ticker: str, n_same: int = 5, n_cross: int = 3, as_of: str | None = None
@@ -117,6 +172,8 @@ class TradingMemoryLog:
         """
         entries = []
         for e in self.load_entries():
+            if e.get("superseded"):
+                continue  # retired by a later run; kept on disk, never taught
             if not e.get("pending"):
                 if as_of is not None and not (
                     e.get("resolved") and e["resolved"] <= as_of
@@ -185,6 +242,13 @@ class TradingMemoryLog:
             return None
         fields = [f.strip() for f in tag_line[1:-1].split("|")]
         if len(fields) < 4 or fields[3] != "pending":
+            return None
+        # A superseded entry is still literally "pending", but settling it would
+        # rewrite its tag through _resolved_tag, which does not carry the
+        # superseded marker -- the retired decision would come back as an
+        # ordinary resolved lesson. Both update paths share this matcher, so
+        # excluding it here closes that for all of them.
+        if any(f.startswith("superseded:") for f in fields[4:]):
             return None
         mandate = next(
             (f.split(":", 1)[1].strip() for f in fields[4:] if f.startswith("mandate:")),
@@ -472,7 +536,7 @@ class TradingMemoryLog:
         tagged, positional = {}, []
         for f in fields[4:]:
             key = f.split(":", 1)[0] if ":" in f else None
-            if key in ("resolved", "mandate"):
+            if key in ("resolved", "mandate", "superseded"):
                 tagged[key] = f.split(":", 1)[1].strip()
             else:
                 positional.append(f)
@@ -486,6 +550,10 @@ class TradingMemoryLog:
             "holding": positional[1] if len(positional) > 1 else None,
             "resolved": tagged.get("resolved"),
             "mandate": tagged.get("mandate", ""),
+            # Date this decision was replaced by a later run of the same
+            # ticker, date and mandate. A superseded entry stays in the log as
+            # an audit trail but is never taught or graded.
+            "superseded": tagged.get("superseded"),
         }
         body = "\n".join(lines[1:]).strip()
         decision_match = self._DECISION_RE.search(body)

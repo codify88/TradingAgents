@@ -527,3 +527,102 @@ def test_the_run_state_carries_the_mandate_to_every_downstream_agent(tmp_path):
     assert "126 trading days" in state["mandate_context"]
     # What the downstream agents actually interpolate:
     assert mandate_section(state).startswith("INVESTMENT MANDATE")
+
+
+# --- superseding a decision ------------------------------------------------
+
+
+def _decision_log(tmp_path):
+    return TradingMemoryLog({"memory_log_path": str(tmp_path / "log.md")})
+
+
+def test_a_rerun_is_dropped_unless_it_says_it_supersedes(tmp_path):
+    log = _decision_log(tmp_path)
+    assert log.store_decision("KO", "2026-09-17", "**Rating**: Buy", mandate="equity_value")
+    assert not log.store_decision("KO", "2026-09-17", "**Rating**: Sell", mandate="equity_value")
+    assert [e["rating"] for e in log.load_entries()] == ["Buy"]
+
+
+def test_superseding_retires_the_old_entry_and_records_the_new_one(tmp_path):
+    """The gap this closes: a rerun after the analysis improved left the log
+    teaching -- and eventually grading -- the decision it replaced."""
+    log = _decision_log(tmp_path)
+    log.store_decision("KO", "2026-09-17", "**Rating**: Buy\nROIC ~25%", mandate="equity_value")
+    assert log.store_decision(
+        "KO", "2026-09-17", "**Rating**: Hold\nROIC 13.9%",
+        mandate="equity_value", supersede=True,
+    )
+
+    entries = log.load_entries()
+    assert len(entries) == 2, "the old entry is retired, not deleted"
+    old, new = entries
+    assert old["superseded"] and "ROIC ~25%" in old["decision"]
+    assert new["superseded"] is None and "ROIC 13.9%" in new["decision"]
+
+
+def test_a_superseded_entry_is_never_taught(tmp_path):
+    log = _decision_log(tmp_path)
+    log.store_decision("KO", "2026-09-17", "**Rating**: Buy\nWRONGFIGURE", mandate="equity_value")
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold\nRIGHTFIGURE",
+                       mandate="equity_value", supersede=True)
+    log.update_with_outcome(
+        ticker="KO", trade_date="2026-09-17", raw_return=0.1, alpha_return=0.02,
+        holding_days=504, reflection="lesson", resolution_date="2028-09-17",
+        mandate="equity_value",
+    )
+    context = log.get_past_context("KO")
+    assert "WRONGFIGURE" not in context
+
+
+def test_a_superseded_entry_is_never_graded(tmp_path):
+    """Grading it would spend a price lookup and a reflection call to put the
+    retired analysis back into the lessons it was retired from."""
+    log = _decision_log(tmp_path)
+    log.store_decision("KO", "2026-09-17", "**Rating**: Buy", mandate="equity_value")
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold",
+                       mandate="equity_value", supersede=True)
+    pending = log.get_pending_entries()
+    assert len(pending) == 1
+    assert pending[0]["rating"] == "Hold"
+
+
+def test_superseding_is_scoped_to_the_mandate(tmp_path):
+    """A value rerun must not retire the momentum call on the same ticker."""
+    log = _decision_log(tmp_path)
+    log.store_decision("KO", "2026-09-17", "**Rating**: Buy", mandate="equity_value")
+    log.store_decision("KO", "2026-09-17", "**Rating**: Sell", mandate="equity_momentum")
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold",
+                       mandate="equity_value", supersede=True)
+    live = {e["mandate"]: e for e in log.load_entries() if not e["superseded"]}
+    assert live["equity_value"]["rating"] == "Hold"
+    assert live["equity_momentum"]["rating"] == "Sell"
+
+
+def test_superseding_twice_leaves_one_live_entry(tmp_path):
+    log = _decision_log(tmp_path)
+    for rating in ("Buy", "Hold", "Sell"):
+        log.store_decision("KO", "2026-09-17", f"**Rating**: {rating}",
+                           mandate="equity_value", supersede=True)
+    live = [e for e in log.load_entries() if not e["superseded"]]
+    assert [e["rating"] for e in live] == ["Sell"]
+    assert len(log.load_entries()) == 3
+
+
+def test_a_superseded_entry_is_not_revived_by_settling_it(tmp_path):
+    """Regression: the resolution path matched on 'pending' alone, and
+    _resolved_tag does not carry the superseded marker -- so settling a retired
+    entry laundered it back into an ordinary resolved lesson."""
+    log = _decision_log(tmp_path)
+    log.store_decision("KO", "2026-09-17", "**Rating**: Buy\nWRONGFIGURE", mandate="equity_value")
+    log.store_decision("KO", "2026-09-17", "**Rating**: Hold\nRIGHTFIGURE",
+                       mandate="equity_value", supersede=True)
+    log.update_with_outcome(
+        ticker="KO", trade_date="2026-09-17", raw_return=0.1, alpha_return=0.02,
+        holding_days=504, reflection="lesson", resolution_date="2028-09-17",
+        mandate="equity_value",
+    )
+    by_decision = {("WRONG" if "WRONGFIGURE" in e["decision"] else "RIGHT"): e
+                   for e in log.load_entries()}
+    assert by_decision["WRONG"]["pending"] is True, "retired entry must stay unsettled"
+    assert by_decision["WRONG"]["superseded"]
+    assert by_decision["RIGHT"]["pending"] is False, "the live entry is the one that settles"

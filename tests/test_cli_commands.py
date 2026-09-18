@@ -25,7 +25,9 @@ calls: list = []
 @pytest.mark.unit
 def test_no_arguments_still_runs_an_analysis(runner):
     assert runner.invoke(m.app, []).exit_code == 0
-    assert calls == [("analysis", {"checkpoint": None, "portfolio": None})]
+    assert calls == [
+        ("analysis", {"checkpoint": None, "portfolio": None, "supersede": False})
+    ]
 
 
 @pytest.mark.unit

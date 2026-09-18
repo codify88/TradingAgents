@@ -77,7 +77,8 @@ class _FakeGraph:
         from tradingagents.graph.signal_processing import SignalProcessor
         return SignalProcessor.process_signal(None, text)
 
-    def record_decision(self, ticker, trade_date, final_state):
+    # Mirrors TradingAgentsGraph: --supersede reaches the log through here.
+    def record_decision(self, ticker, trade_date, final_state, supersede=False):
         self.calls.append(("record_decision", ticker, trade_date, final_state.get("final_trade_decision")))
 
     def get_graph_args(self, callbacks=None):

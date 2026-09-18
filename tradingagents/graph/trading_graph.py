@@ -622,7 +622,8 @@ class TradingAgentsGraph:
             parts.append("mandate_analysts=" + ",".join(a.key for a in mandate_analysts))
         return "|".join(parts)
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock", portfolio=None):
+    def propagate(self, company_name, trade_date, asset_type: str = "stock", portfolio=None,
+                  supersede: bool = False):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -645,6 +646,7 @@ class TradingAgentsGraph:
             return self._run_graph(
                 company_name, trade_date, asset_type=asset_type,
                 checkpoint_thread_id=thread_id_value, portfolio=portfolio,
+                supersede=supersede,
             )
 
     def begin_checkpoint(self, company_name, trade_date, asset_type: str = "stock", portfolio=None) -> str | None:
@@ -757,19 +759,27 @@ class TradingAgentsGraph:
         """
         self._resolve_pending_entries(company_name)
 
-    def record_decision(self, company_name, trade_date, final_state):
+    def record_decision(self, company_name, trade_date, final_state, supersede: bool = False):
         """Log a finished run's decision for reflection on the next same-ticker run."""
         decision = final_state.get("final_trade_decision")
         if not decision:
             logger.warning("No final decision for %s on %s; nothing logged", company_name, trade_date)
             return
-        self.memory_log.store_decision(
+        written = self.memory_log.store_decision(
             ticker=company_name, trade_date=trade_date, final_trade_decision=decision,
-            mandate=self.mandate_name,
+            mandate=self.mandate_name, supersede=supersede,
         )
+        if not written:
+            logger.info(
+                "%s on %s under mandate %r is already logged; this run was not "
+                "recorded. Pass supersede=True (CLI: --supersede) to retire the "
+                "existing entry and record this one in its place.",
+                company_name, trade_date, self.mandate_name or "none",
+            )
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock",
-                   checkpoint_thread_id: str | None = None, portfolio=None):
+                   checkpoint_thread_id: str | None = None, portfolio=None,
+                   supersede: bool = False):
         """Execute the graph and write the resulting state to disk and memory log."""
         init_agent_state = self.create_run_state(company_name, trade_date, asset_type, portfolio)
         args = self.propagator.get_graph_args()
@@ -809,7 +819,7 @@ class TradingAgentsGraph:
         # Log state to disk.
         self._log_state(trade_date, final_state)
 
-        self.record_decision(company_name, trade_date, final_state)
+        self.record_decision(company_name, trade_date, final_state, supersede)
 
         # Clear checkpoint on successful completion to avoid stale state.
         self.clear_checkpoint_on_success(company_name, trade_date, asset_type, portfolio)
