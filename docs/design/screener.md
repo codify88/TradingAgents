@@ -60,6 +60,11 @@ reason, the shortlist and the control, and writes a manifest under
 `results_dir/screens/`. No LLM call, so a screen can be sanity-checked before
 tier 3 is paid for.
 
+`tradingagents screen-run <id>` (or `screen --run`) adjudicates tier 3: picks and
+control through the loop as one sweep under the screen's mandate and date, with
+a run id derived from the screen's so it resumes. `screen-run --all` runs every
+unfinished screen and is safe to schedule.
+
 `tradingagents screen-review` joins saved manifests back to the decision log and
 reports picks against controls. It refuses a verdict until both arms settle:
 picks returning well while no control has settled is a statement about the

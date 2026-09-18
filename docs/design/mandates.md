@@ -237,7 +237,10 @@ Alpha Vantage has dropped, and grading that settles a delisted-mid-horizon
 name at its last trade. What remains unrecoverable is counted in each
 screen's notes. See `docs/design/screener.md`.
 
-**Still open.** Tier 3 is manual: the screen prints the `backtest` command to
-run its shortlist and control through the loop, but nothing runs it for you.
-Wiring that up is the obvious next step, and upstream's `run_backtest` already
-does the grid, so it is plumbing rather than new machinery.
+**Tier 3 is automated.** `tradingagents screen-run` (or `screen --run`) takes a
+screen's picks and control through the loop as one sweep, dated at the screen
+and run under its mandate, with a run id derived from the screen's so it
+resumes and so `screen-review` scores it. `--all` runs whatever is unfinished,
+which makes the whole screen -> adjudicate -> review cycle schedulable.
+
+**Still open.** LEAPS, bonds and FX -- new asset types, not new mandates.

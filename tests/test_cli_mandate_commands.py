@@ -78,7 +78,8 @@ def test_the_command_screen_prints_keeps_the_mandate(monkeypatch):
     import tradingagents.screener as screener
     import tradingagents.screener.review as review
 
-    manifest = SimpleNamespace(picks=["x"], pick_symbols=["KO", "PEP"], control_symbols=["XOM"])
+    manifest = SimpleNamespace(picks=["x"], pick_symbols=["KO", "PEP"], control_symbols=["XOM"],
+                               run_id="2026-09-18_equity_value_101500")
     monkeypatch.setattr(screener, "run_screen",
                         lambda *a, **k: SimpleNamespace(manifest=manifest, excluded=[]))
     monkeypatch.setattr(screener, "save_manifest", lambda *a: "manifest.json")
@@ -89,6 +90,7 @@ def test_the_command_screen_prints_keeps_the_mandate(monkeypatch):
     assert result.exit_code == 0, result.output
     assert ("tradingagents backtest KO,PEP,XOM --start 2026-09-18 --end 2026-09-18 "
             "--mandate equity_value") in plain(result.output)
+    assert "tradingagents screen-run 101500" in plain(result.output)
 
 
 @pytest.mark.unit

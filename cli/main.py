@@ -1583,6 +1583,14 @@ def screen(
     show_excluded: bool = typer.Option(
         False, "--show-excluded", help="Append the full exclusion list to the report."
     ),
+    run: bool = typer.Option(
+        False, "--run",
+        help="Then run the shortlist and its control through the agent loop "
+             "(~8 min per name). Same as `screen-run` on this screen afterwards.",
+    ),
+    analysts: str = typer.Option(
+        None, "--analysts", help="With --run: comma-separated analysts; omit for all four."
+    ),
 ):
     """Find candidates for the analyst loop, without spending an LLM call."""
     from tradingagents.screener import run_screen, save_manifest
@@ -1604,12 +1612,103 @@ def screen(
         render_screen(result.manifest, result.excluded if show_excluded else None)
     ))
     console.print(f"\n[dim]Manifest: {path}[/dim]")
-    if result.manifest.picks:
-        names = ",".join(result.manifest.pick_symbols + result.manifest.control_symbols)
-        console.print(
-            f"[dim]Run the shortlist and its control through the loop:[/dim]\n"
-            f"  tradingagents backtest {names} --start {as_of} --end {as_of} --mandate {mandate}"
-        )
+    if not result.manifest.picks:
+        return
+    if run:
+        from tradingagents.screener import run as screen_run
+
+        _run_screen_plan(screen_run.plan(result.manifest, DEFAULT_CONFIG), analysts)
+        return
+    names = ",".join(result.manifest.pick_symbols + result.manifest.control_symbols)
+    short_id = result.manifest.run_id.rsplit("_", 1)[-1]
+    console.print(
+        f"[dim]Run the shortlist and its control through the loop:[/dim]\n"
+        f"  tradingagents screen-run {short_id}\n"
+        f"[dim]or, equivalently:[/dim]\n"
+        f"  tradingagents backtest {names} --start {as_of} --end {as_of} --mandate {mandate}"
+    )
+
+
+def _analyst_list(analysts: str | None) -> list[str] | None:
+    return [a.strip().lower() for a in analysts.split(",") if a.strip()] if analysts else None
+
+
+def _run_screen_plan(plan, analysts: str | None) -> None:
+    """Adjudicate one screen's undecided names and report what happened."""
+    from tradingagents.agents.utils.memory import TradingMemoryLog
+    from tradingagents.screener import run as screen_run
+
+    m = plan.manifest
+    if not plan.todo:
+        console.print(f"[green]Screen {m.run_id}: every name is already decided.[/green]")
+        return
+    picks = [n for n in plan.todo if n in m.pick_symbols]
+    controls = [n for n in plan.todo if n not in m.pick_symbols]
+    console.print(
+        f"[cyan]Screen {m.run_id}[/cyan] ({m.mandate or 'no mandate'}, as of {m.as_of}): "
+        f"{len(plan.todo)} names to decide -- picks {', '.join(picks) or 'none'}; "
+        f"controls {', '.join(controls) or 'none'}. About {plan.minutes} minutes."
+    )
+    try:
+        result = screen_run.run(m, DEFAULT_CONFIG, _analyst_list(analysts), runner=run_backtest)
+    except Exception as exc:  # a missing key or an unknown analyst is a setup error
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(summarize(TradingMemoryLog({"memory_log_path": str(result.log_path)})).render())
+    console.print(f"\nRan {result.cells_run} names, skipped {result.skipped}. Log: {result.log_path}")
+    for ticker, date, reason in result.failures:
+        console.print(f"[yellow]failed:[/yellow] {ticker} {date}: {reason} -- run again to retry")
+    console.print(
+        "[dim]Decisions settle once the mandate's horizon has traded; "
+        "`tradingagents screen-review` scores picks against the control then.[/dim]"
+    )
+
+
+@app.command(name="screen-run")
+def screen_run_command(
+    screen_id: str = typer.Argument(
+        None, help="A screen's id -- the full id, the short one screen-review shows, or 'latest'.",
+    ),
+    all_: bool = typer.Option(
+        False, "--all", help="Run every saved screen that still has undecided names, oldest first.",
+    ),
+    mandate: str = typer.Option(None, "--mandate", help="With --all: only this mandate's screens."),
+    analysts: str = typer.Option(
+        None, "--analysts", help="Comma-separated analysts to run; omit for all four."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would run and roughly how long, then stop."
+    ),
+):
+    """Run a saved screen's shortlist and control through the agent loop.
+
+    Resumable: names already decided are skipped, so an interrupted run
+    continues by being run again. With --all it is the unattended step after
+    `screen`, safe to schedule.
+    """
+    from tradingagents.screener import run as screen_run
+
+    if all_ == bool(screen_id):
+        console.print("[red]Give a screen id, or --all -- not both, not neither.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        plans = (screen_run.unfinished(DEFAULT_CONFIG, mandate) if all_
+                 else [screen_run.plan(screen_run.find(DEFAULT_CONFIG, screen_id), DEFAULT_CONFIG)])
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+
+    if not any(p.todo for p in plans):
+        console.print("[green]Nothing to run: every screen's names are already decided.[/green]")
+        return
+    if dry_run:
+        for p in plans:
+            console.print(f"{p.manifest.run_id}: {len(p.todo)} names ({', '.join(p.todo)}), "
+                          f"about {p.minutes} minutes")
+        console.print(f"Total: about {sum(p.minutes for p in plans)} minutes.")
+        return
+    for p in plans:
+        _run_screen_plan(p, analysts)
 
 
 @app.command(name="screen-review")

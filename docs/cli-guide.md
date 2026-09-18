@@ -10,6 +10,7 @@ shown it is trimmed from an actual run.
 - [Mandates](#mandates)
 - [The decision log](#the-decision-log)
 - [`screen` — find candidates without an LLM](#screen--find-candidates-without-an-llm)
+- [`screen-run` — adjudicate a screen](#screen-run--adjudicate-a-screen)
 - [`backtest` — score decisions over a grid](#backtest--score-decisions-over-a-grid)
 - [`screen-review` — does the screen earn its keep?](#screen-review--does-the-screen-earn-its-keep)
 - [Recipes](#recipes)
@@ -21,11 +22,13 @@ shown it is trimmed from an actual run.
 
 ## The mental model
 
-Four commands, one loop:
+Five commands, one loop:
 
 ```
-  screen ──▶ shortlist + random control ──▶ backtest ──▶ decision log(s) ──▶ screen-review
-   (no LLM)        (manifest on disk)       (LLM loop)    (graded later)       (picks vs control)
+  screen ──▶ shortlist + random control ──▶ screen-run ──▶ decision log(s) ──▶ screen-review
+   (no LLM)        (manifest on disk)       (LLM loop)       (graded later)       (picks vs control)
+
+  backtest: the same LLM loop over any ticker/date grid you choose
 
   tradingagents (interactive) ──▶ one decision ──▶ live decision log ──▶ graded on a later run
 ```
@@ -348,12 +351,43 @@ Run the shortlist and its control through the loop:
   tradingagents backtest AAMI,AAUC,AAPL,ABBV,A --start 2026-09-18 --end 2026-09-18 --mandate equity_momentum
 ```
 
-Run the printed command as-is: it carries the mandate and puts picks and
-controls in one sweep, which is what `screen-review` scores.
+Add `--run` to adjudicate the shortlist and control straight away, or run it
+later with the `screen-run` command the screen prints.
 
 Budget trade-off: `--budget` is the only knob that spends Alpha Vantage calls.
 Raising it examines more names on fundamentals; it does not change what counts
 as eligible, only how many liquid names get a look.
+
+---
+
+## `screen-run` — adjudicate a screen
+
+`screen-run` takes a saved screen's picks and control through the agent loop together, as one sweep dated at the screen's
+as-of date and run under its mandate.
+
+```bash
+tradingagents screen-run 165135                # the short id screen and screen-review print
+tradingagents screen-run latest --analysts market,fundamentals
+tradingagents screen-run --all --dry-run       # what is unfinished, and how long it would take
+tradingagents screen-run --all                 # run everything unfinished, oldest first
+tradingagents screen --mandate equity_value --run   # screen, then adjudicate, in one go
+```
+
+| Flag | Use |
+|---|---|
+| `SCREEN_ID` | full id, short id (the time suffix), or `latest` |
+| `--all` | every saved screen with undecided names |
+| `--mandate` | with `--all`: only this mandate's screens |
+| `--analysts` | which upstream analysts run; the mandate's own always do |
+| `--dry-run` | list names and an estimate (~8 min each), spend nothing |
+
+- **Resumable.** The sweep's id comes from the screen's (`scr_20220301_momentum_165135`), and a name counts as done only if
+  it was decided on the screen's date under its mandate. An interrupted run continues by running it again, and `--all` is
+  safe to schedule.
+- **Scored automatically.** Outcomes land in the sweep's log, which `screen-review` reads.
+- **Delisted names can still be priced.** For a historical screen, Alpha Vantage is added after your configured price
+  vendors, so a company Yahoo has dropped still gets prices, indicators and a verified snapshot (quoted as reported).
+  Live screens run on your vendors unchanged.
 
 ---
 
@@ -454,20 +488,19 @@ control:
 # 1. Screen. Fix the seed so the control draw is reproducible later.
 tradingagents screen --mandate equity_value --picks 8 --controls 4 --seed 2026
 
-# 2. Run the printed command (picks + controls, one sweep, mandate carried).
-tradingagents backtest <PICKS,CONTROLS> --start 2026-09-18 --end 2026-09-18 \
-  --mandate equity_value --run-id value_2026_09
+# 2. Adjudicate picks + controls (one resumable sweep, mandate and date carried).
+tradingagents screen-run latest --analysts market,fundamentals
 
 # 3. Read the analysis. A sweep keeps each cell's full state as JSON (every
 #    persona's report, the debates, the decision) rather than a report tree:
-ls ~/.tradingagents/logs/backtest/value_2026_09/*/TradingAgentsStrategy_logs/
+ls ~/.tradingagents/logs/backtest/scr_*_value_*/*/TradingAgentsStrategy_logs/
 #    To get the usual one-file-per-persona tree for a cell:
 #    (the state log names the trader's plan differently and omits the mandate,
 #    so both are supplied here)
 .venv/bin/python -c "import json,sys; from tradingagents.reporting import write_report_tree as w; \
 s=json.load(open(sys.argv[1])); s['mandate']='equity_value'; \
 s['trader_investment_plan']=s.get('trader_investment_decision',''); print(w(s, 'KO', 'ko_report'))" \
-  ~/.tradingagents/logs/backtest/value_2026_09/KO/TradingAgentsStrategy_logs/full_states_log_2026-09-18.json
+  ~/.tradingagents/logs/backtest/scr_20260918_value_<id>/KO/TradingAgentsStrategy_logs/full_states_log_2026-09-18.json
 
 # 4. Months later: interim reviews appear in the sweep's log as the 63/126/252-day
 #    marks pass. Two years later, screen-review can score it.
@@ -483,7 +516,8 @@ instead, and let the backtest settle it immediately:
 for d in 2022-03-01 2022-09-01 2023-03-01 2023-09-01; do
   tradingagents screen --mandate equity_momentum --date "$d" --picks 5 --controls 5 --seed 1
 done
-# Run each printed backtest command, then:
+tradingagents screen-run --all --mandate equity_momentum --dry-run   # 40 names, ~5 hours
+tradingagents screen-run --all --mandate equity_momentum
 tradingagents screen-review --mandate equity_momentum
 ```
 
@@ -541,6 +575,18 @@ TODAY=$(date +%F)
 Note that a sweep writes to its own log, so these decisions will not appear in
 the live log your interactive runs read back. That is deliberate; if you want
 them there, run the interactive CLI instead.
+
+The screener runs unattended the same way, as a screen followed by its adjudication.
+`screen-run --all` resumes anything a previous night left unfinished:
+
+```bash
+#!/usr/bin/env bash
+# monthly-screen.sh — first of the month: screen, then adjudicate.
+set -euo pipefail
+cd ~/GIT/trade-agents
+.venv/bin/tradingagents screen --mandate equity_momentum --picks 5 --controls 5
+.venv/bin/tradingagents screen-run --all --analysts market,fundamentals
+```
 
 ### 6. Re-grade after improving the analysis
 
