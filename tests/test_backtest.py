@@ -41,9 +41,12 @@ class _FakeGraph:
     instances: list = []
     fail_on: set = set()
 
-    def __init__(self, selected_analysts=None, config=None, **kw):
+    def __init__(self, selected_analysts=None, config=None, mandate=None, **kw):
         self.analysts = list(selected_analysts) if selected_analysts else None
         self.config = config
+        self.mandate_arg = mandate
+        # Mirrors TradingAgentsGraph: an explicit mandate wins, else the config's.
+        self.mandate_name = (mandate if mandate is not None else config.get("mandate", "")) or ""
         self.memory_log = TradingMemoryLog(config)
         self.calls = []
         self.settled = []
@@ -53,7 +56,7 @@ class _FakeGraph:
         self.calls.append((ticker, trade_date))
         if (ticker, trade_date) in _FakeGraph.fail_on:
             raise RuntimeError("vendor exploded")
-        self.memory_log.store_decision(ticker, trade_date, DECISION)
+        self.memory_log.store_decision(ticker, trade_date, DECISION, mandate=self.mandate_name)
         return {"final_trade_decision": DECISION}, "Buy"
 
     def settle_pending(self, ticker):
@@ -246,3 +249,42 @@ def test_the_window_reported_is_the_one_the_outcomes_used(tmp_path):
     log.update_with_outcome("NVDA", "2026-01-05", 0.1, 0.04, 21, "note", "2026-02-01")
 
     assert "21 trading days" in summarize(log).render()
+
+
+# --- mandate ------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_the_mandate_under_test_is_the_one_that_runs(tmp_path):
+    """A value sweep must not silently run unmandated: no analysts, 5-day grading."""
+    run_backtest(["KO"], ["2026-01-05"], _config(tmp_path), mandate="equity_value")
+    graph = _FakeGraph.instances[-1]
+    assert graph.mandate_arg == "equity_value"
+    entry = TradingMemoryLog({"memory_log_path": str(graph.config["memory_log_path"])}).load_entries()[0]
+    assert entry["mandate"] == "equity_value"
+
+
+@pytest.mark.unit
+def test_no_mandate_argument_defers_to_the_config(tmp_path):
+    """None keeps TRADINGAGENTS_MANDATE working exactly as it does for a single run."""
+    run_backtest(["KO"], ["2026-01-05"], {**_config(tmp_path), "mandate": "equity_momentum"})
+    graph = _FakeGraph.instances[-1]
+    assert graph.mandate_arg is None
+    assert graph.mandate_name == "equity_momentum"
+
+
+@pytest.mark.unit
+def test_resuming_under_the_same_mandate_skips_done_cells(tmp_path):
+    cfg = _config(tmp_path)
+    run_backtest(["KO"], ["2026-01-05"], cfg, run_id="r1", mandate="equity_value")
+    again = run_backtest(["KO"], ["2026-01-05"], cfg, run_id="r1", mandate="equity_value")
+    assert (again.cells_run, again.skipped) == (0, 1)
+
+
+@pytest.mark.unit
+def test_resuming_under_a_different_mandate_reruns_the_cells(tmp_path):
+    """A value cell is not a momentum cell: different analysts, framing and horizon."""
+    cfg = _config(tmp_path)
+    run_backtest(["KO"], ["2026-01-05"], cfg, run_id="r1", mandate="equity_value")
+    other = run_backtest(["KO"], ["2026-01-05"], cfg, run_id="r1", mandate="equity_momentum")
+    assert (other.cells_run, other.skipped) == (1, 0)

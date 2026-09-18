@@ -1511,6 +1511,11 @@ def backtest(
     run_id: str = typer.Option(
         None, "--run-id", help="Continue an earlier sweep: its cells are skipped and its log reused"
     ),
+    mandate: str = typer.Option(
+        None, "--mandate",
+        help="Investment mandate to run every cell under, e.g. equity_value. Omit to "
+             "honor TRADINGAGENTS_MANDATE; pass an empty string for no mandate.",
+    ),
 ):
     """Score past decisions over a grid of tickers and dates."""
     from tradingagents.agents.utils.memory import TradingMemoryLog
@@ -1527,7 +1532,9 @@ def backtest(
         console.print("[red]No ticker to analyze; pass them comma-separated, e.g. NVDA,AAPL[/red]")
         raise typer.Exit(code=1)
 
-    kwargs = {"asset_type": asset_type, "portfolio": book, "run_id": run_id}
+    kwargs = {"asset_type": asset_type, "portfolio": book, "run_id": run_id, "mandate": mandate}
+    resolved = mandate if mandate is not None else DEFAULT_CONFIG.get("mandate", "")
+    console.print(f"[cyan]Mandate:[/cyan] {resolved or 'none'}")
     if analysts:
         kwargs["selected_analysts"] = [a.strip().lower() for a in analysts.split(",") if a.strip()]
 
@@ -1543,9 +1550,6 @@ def backtest(
     for ticker, reason in result.settlement_failures:
         console.print(f"[yellow]unsettled:[/yellow] {ticker}: {reason}")
 
-
-if __name__ == "__main__":
-    app()
 
 
 @app.command()
@@ -1604,7 +1608,7 @@ def screen(
         names = ",".join(result.manifest.pick_symbols + result.manifest.control_symbols)
         console.print(
             f"[dim]Run the shortlist and its control through the loop:[/dim]\n"
-            f"  tradingagents backtest {names} --start {as_of} --end {as_of}"
+            f"  tradingagents backtest {names} --start {as_of} --end {as_of} --mandate {mandate}"
         )
 
 
@@ -1618,3 +1622,7 @@ def screen_review(
     from tradingagents.screener.review import render_performance
 
     console.print(Markdown(render_performance(DEFAULT_CONFIG, mandate)))
+
+
+if __name__ == "__main__":
+    app()

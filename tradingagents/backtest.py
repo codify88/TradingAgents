@@ -132,12 +132,20 @@ def run_backtest(
     portfolio=None,
     selected_analysts=("market", "social", "news", "fundamentals"),
     run_id: str | None = None,
+    mandate: str | None = None,
 ) -> BacktestResult:
     """Analyze every ticker on every date, into a decision log of this run's own.
 
     The live log stays untouched: a sweep would otherwise flood the context that
     real runs read back. Cells already in this run's log are skipped, so an
     interrupted sweep resumes by being run again.
+
+    ``mandate`` is the investment-mandate wire name the sweep runs under; None
+    falls back to ``config["mandate"]`` (``TRADINGAGENTS_MANDATE``), exactly as
+    a single run does. It decides the analysts that run, the framing every
+    agent reads, and the horizon each cell is graded over -- so it is part of
+    what a cell *is*, and resuming a sweep under a different mandate re-runs
+    its cells rather than treating them as done.
     """
     # run_id becomes a path segment, so it is validated like a ticker: an
     # absolute or dotted value would otherwise place the run outside results_dir.
@@ -147,13 +155,16 @@ def run_backtest(
     run_config = {**config, "results_dir": str(run_dir),
                   "memory_log_path": str(run_dir / "trading_memory.md")}
 
-    graph = TradingAgentsGraph(selected_analysts, config=run_config)
+    graph = TradingAgentsGraph(selected_analysts, config=run_config, mandate=mandate)
     result = BacktestResult(run_id=run_id, log_path=Path(run_config["memory_log_path"]))
-    done = {(e["ticker"], e["date"]) for e in graph.memory_log.load_entries()}
+    done = {
+        (e["ticker"], e["date"], e.get("mandate", ""))
+        for e in graph.memory_log.load_entries()
+    }
 
     for ticker in tickers:
         for date in dates:
-            if (ticker, date) in done:
+            if (ticker, date, graph.mandate_name) in done:
                 result.skipped += 1
                 continue
             try:
