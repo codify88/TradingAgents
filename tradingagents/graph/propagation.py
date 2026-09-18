@@ -75,6 +75,8 @@ class Propagator:
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
+            # Reports from analysts the mandate adds (see mandates/graph.py).
+            "mandate_reports": {},
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

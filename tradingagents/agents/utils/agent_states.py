@@ -4,6 +4,17 @@ from langgraph.graph import MessagesState
 from typing_extensions import TypedDict
 
 
+def merge_mandate_reports(
+    left: dict[str, str] | None, right: dict[str, str] | None
+) -> dict[str, str]:
+    """Reducer for ``mandate_reports``: each mandate analyst adds its own key.
+
+    One dict-valued channel serves every analyst any mandate adds, so a new
+    analyst never needs a new field here.
+    """
+    return {**(left or {}), **(right or {})}
+
+
 # Researcher team state
 class InvestDebateState(TypedDict):
     bull_history: Annotated[
@@ -61,6 +72,7 @@ class AgentState(MessagesState):
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    mandate_reports: Annotated[dict[str, str], merge_mandate_reports]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

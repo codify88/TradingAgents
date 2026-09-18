@@ -12,9 +12,23 @@ merging cleanly (see docs/design/mandates.md).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .analysts.base import MandateAnalyst
 
 # Trading days, not calendar days: the reflection loop counts price bars.
 TRADING_DAYS_PER_YEAR = 252
+
+# Graph names a mandate analyst may not take: upstream's analyst keys and every
+# fixed node. A collision would silently overwrite an upstream node when the
+# graph is built. Pinned against upstream by a drift test.
+RESERVED_ANALYST_KEYS = frozenset({"market", "social", "news", "fundamentals"})
+RESERVED_NODE_NAMES = frozenset({
+    "Market Analyst", "Sentiment Analyst", "News Analyst", "Fundamentals Analyst",
+    "Bull Researcher", "Bear Researcher", "Research Manager", "Trader",
+    "Aggressive Analyst", "Conservative Analyst", "Neutral Analyst", "Portfolio Manager",
+})
 
 # The indicator menu the market analyst's prompt offers, which is also the set
 # both data vendors implement (yfinance additionally has ``mfi``; Alpha Vantage
@@ -51,6 +65,15 @@ class Mandate:
     rating_guidance: str = ""
     disqualifiers: tuple[str, ...] = ()
     indicator_shortlist: tuple[str, ...] = ()
+    # How the trader, risk debate and portfolio manager should define risk.
+    # Upstream's debate implicitly treats risk as volatility; a long-horizon
+    # value mandate means permanent loss of capital, which is a different debate.
+    risk_frame: str = ""
+
+    # --- extra analysts -------------------------------------------------------
+    # Personas this mandate adds after upstream's analysts, each with its own
+    # tools. Their reports reach every downstream agent via the mandate block.
+    analysts: tuple[MandateAnalyst, ...] = ()
 
     def __post_init__(self):
         if self.horizon_days < 1:
@@ -74,6 +97,22 @@ class Mandate:
                 f"mandate {self.name!r}: unknown indicator(s) in "
                 f"indicator_shortlist: {', '.join(sorted(unknown))}"
             )
+        keys = [a.key for a in self.analysts]
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"mandate {self.name!r}: duplicate analyst keys {keys}")
+        for a in self.analysts:
+            if a.key in RESERVED_ANALYST_KEYS:
+                raise ValueError(
+                    f"mandate {self.name!r}: analyst key {a.key!r} is upstream's"
+                )
+            if a.label in RESERVED_NODE_NAMES:
+                raise ValueError(
+                    f"mandate {self.name!r}: analyst label {a.label!r} is an upstream node"
+                )
+
+    def analyst(self, key: str) -> MandateAnalyst | None:
+        """The mandate analyst with this key, or None."""
+        return next((a for a in self.analysts if a.key == key), None)
 
     @property
     def all_horizons_days(self) -> tuple[int, ...]:
@@ -135,4 +174,6 @@ def render_mandate_context(mandate: Mandate | None) -> str:
         )
     if mandate.rating_guidance:
         lines.append(f"Rating at this horizon: {mandate.rating_guidance}")
+    if mandate.risk_frame:
+        lines.append(f"How to judge risk: {mandate.risk_frame}")
     return "\n".join(lines)

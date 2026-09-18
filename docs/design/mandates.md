@@ -39,6 +39,8 @@ behalf, over what horizon, judged how*. They are orthogonal:
 | `rating_guidance` | How conviction maps onto the existing 5-tier rating at this horizon |
 | `disqualifiers` | Hard screens that force Sell/Hold regardless of the debate |
 | `indicator_shortlist` | Which technical indicators are even relevant |
+| `risk_frame` | What "risk" means to the trader, risk debate and PM (e.g. permanent capital loss, not volatility) |
+| `analysts` | Extra personas the mandate adds to the analyst team, each with its own tools |
 
 Prompts stay upstream's. The mandate is **injected**, never forked, so
 `git merge upstream/main` keeps working.
@@ -60,6 +62,74 @@ Prompts stay upstream's. The mandate is **injected**, never forked, so
   expensive agent graph only runs on the top N names.
 - **Later.** LEAPS (`HISTORICAL_OPTIONS`), bonds (`TREASURY_YIELD`), FX
   (`FX_DAILY`) - all covered by the same Alpha Vantage key.
+
+## Mandate analysts and tools
+
+A mandate can add analysts of its own. `equity_value` adds two: a **Quality
+Analyst** (is this a durable business?) and a **Valuation Analyst** (does this
+price leave a margin of safety?). Each gets only the tools for its half of the
+question, so neither drifts into the other's job.
+
+```
+tradingagents/mandates/
+  tools/        financials.py   point-in-time Alpha Vantage statements, prices
+                quality.py      ROIC, ROTC, margins, cash conversion, screens
+                valuation.py    multiples vs own history, reverse DCF, screen
+                value_tools.py  the four LLM tools, rendered as cited markdown
+  analysts/     base.py         MandateAnalyst + the node that runs one
+                value.py        Quality and Valuation analysts
+  graph.py      splices analysts into the graph; reads their reports back
+```
+
+**Why tools live here, not in `dataflows/`.** Upstream's tools are thin shims
+over a vendor-pluggable data layer. These are *computations* over vendor data,
+not a new vendor; registering them with upstream's router would put every
+mandate tool on a file upstream edits often. They reuse upstream's Alpha
+Vantage request helper unmodified.
+
+**The extension point.** Adding an analyst node upstream touches six
+registries. P2 paid that once, generically, so P3's analysts are purely
+additive:
+
+| Upstream file | Hook |
+|---|---|
+| `agent_states.py` | one `mandate_reports` dict channel with a merge reducer, for every mandate analyst |
+| `propagation.py` | `mandate_reports` starts empty |
+| `graph/setup.py` | `setup_graph(..., mandate_analysts=())` splices them in after the selected analysts |
+| `trading_graph.py` | passes `mandate.analysts`; keys them into the checkpoint signature; logs their reports |
+| `agent_utils.mandate_section` | appends their reports, so every downstream agent -- which already reads this section -- sees them with no prompt edit |
+| `reporting.py`, `cli/main.py` | one file and one status row per persona |
+
+With no mandate, or a mandate without analysts, every one of these is a no-op.
+
+**Point-in-time statements.** Upstream admits a statement once its fiscal
+period has *ended*. That leaks: FY2025 ends 31 Dec but is not public until the
+February earnings release. The loader admits a period only once it was
+*reported*, using the `reportedDate` Alpha Vantage's EARNINGS endpoint carries,
+and falls back to the SEC filing deadline (90 days for a 10-K, 45 for a 10-Q).
+
+**Screens.** The disqualifiers the statements can settle are computed, with
+the threshold printed next to the measured value:
+
+| Status | Meaning |
+|---|---|
+| `TRIPPED` | The numbers meet the disqualifier |
+| `WATCH` | They meet it on one reading but not another; the analyst must say which reading holds and why |
+| `CLEAR` | They do not |
+| `NO DATA` | The statements cannot settle it; the analyst must say so, not guess |
+
+`WATCH` exists because the honest answer is sometimes "it depends on which
+year you believe." A screen that trips on annual cash conversion while the
+trailing twelve months have recovered is reporting a one-off, not a trend.
+Where a verdict depends on an assumption, the screen uses the assumption most
+generous to the stock (a 7% discount rate; the best of revenue, operating
+income and FCF growth as the record), so a `TRIPPED` never rests on a
+contestable input.
+
+**Requires `ALPHA_VANTAGE_API_KEY`.** yfinance carries about four years of
+statements, too few to judge durability. Without the key the tools return an
+explicit `UNAVAILABLE` notice and the analysts are told to report the gap
+rather than fill it from memory.
 
 ## Design rules
 
@@ -123,5 +193,12 @@ settle (it requested 511 days for a window that spans ~730); and log rotation
 identified pending entries by the tag suffix `| pending]`, which the `mandate:`
 marker broke, making unresolved long-horizon work prunable.
 
-**In progress.** P2 (value analysis tools and analysts).
+**P2 is landed.** `equity_value` runs a Quality Analyst and a Valuation
+Analyst on computed, point-in-time evidence (see *Mandate analysts and tools*),
+its risk debate is framed around permanent capital loss rather than
+volatility, and the upstream fundamentals and market analysts are narrowed so
+they no longer re-derive ratios or quote historical ranges from memory -- the
+P1 KO run asserted a "normal 20-22x" P/E band for KO; the computed ten-year
+range is 23x to 32x.
+
 **Not yet started.** P3 (momentum), P4 (screener).

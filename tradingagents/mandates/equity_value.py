@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .analysts.value import VALUE_ANALYSTS
 from .base import Mandate
 
 EQUITY_VALUE = Mandate(
@@ -33,25 +34,25 @@ EQUITY_VALUE = Mandate(
     ),
     analyst_guidance={
         "fundamentals": (
-            "Read the financials as an owner underwriting a decade, not a "
-            "quarter. Work from the longest history available and emphasise: "
-            "return on invested capital and its trend; gross and operating "
-            "margin stability through the last downturn; free cash flow "
-            "conversion versus reported earnings; share count trend (is "
-            "dilution quietly consuming per-share value?); debt maturity and "
-            "net debt / EBITDA; and what management has actually done with "
-            "cash over the period. Call out accounting quality concerns "
-            "explicitly: divergence between net income and operating cash "
-            "flow, rising receivables or inventory versus revenue, and heavy "
-            "reliance on adjusted metrics. A single strong year is not "
-            "evidence of durability."
+            "The Quality Analyst and Valuation Analyst receive a decade of "
+            "computed metrics -- returns on capital, margins, cash conversion, "
+            "capital allocation, multiples against history. Do not re-derive "
+            "those ratios or growth rates yourself, and never quote a "
+            "historical multiple or 'normal range' from memory. Your job is "
+            "the recent record they cannot see in annual tables: what changed "
+            "in the latest quarters and why, segment and business-mix shifts, "
+            "one-off items (settlements, deposits, earn-outs, impairments, tax "
+            "charges) and management's stated explanation for each, debt "
+            "maturities, and any accounting-policy change. A single strong or "
+            "weak quarter is not evidence of a trend -- say which it is."
         ),
         "market": (
             "Price action is secondary here and must not drive the "
             "recommendation. Use it only to (a) establish the current price "
-            "and a sane entry range, (b) characterise the valuation starting "
-            "point relative to the last several years, and (c) flag whether "
-            "recent weakness reflects a changed business or a changed mood. "
+            "and a sane entry range, (b) characterise the multi-year price "
+            "trend -- valuation multiples belong to the Valuation Analyst -- and "
+            "(c) flag whether recent weakness reflects a changed business or a "
+            "changed mood. "
             "Do not present short-term overbought/oversold readings as reasons "
             "to buy or sell a multi-year position."
         ),
@@ -91,4 +92,19 @@ EQUITY_VALUE = Mandate(
         "No margin of safety: the price already embeds an optimistic case.",
     ),
     indicator_shortlist=("close_200_sma", "close_50_sma", "atr"),
+    risk_frame=(
+        "risk is permanent loss of capital, not volatility. A deep drawdown in a "
+        "business whose earning power is intact is an opportunity; a flat price "
+        "on a business whose returns on capital are eroding is a loss not yet "
+        "marked. Weigh two things: the chance that intrinsic value itself falls "
+        "(moat erosion, leverage, capital misallocation, accounting that flatters "
+        "earnings), and overpayment -- how far the price sits above a conservative "
+        "value, because that gap is lost when the market stops paying for "
+        "optimism. Exits are triggered by named breaks in the thesis, not by "
+        "price stops; if you do name a price level, justify it as the point at "
+        "which the price itself says the thesis has broken, not as a volatility "
+        "band. Size to the probability and depth of permanent loss, not to "
+        "recent price swings."
+    ),
+    analysts=VALUE_ANALYSTS,
 )

@@ -184,7 +184,10 @@ class TradingAgentsGraph:
         self.selected_analysts = tuple(selected_analysts)
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
-        self.workflow = self.graph_setup.setup_graph(selected_analysts)
+        self.workflow = self.graph_setup.setup_graph(
+            selected_analysts,
+            mandate_analysts=self.mandate.analysts if self.mandate is not None else (),
+        )
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
         self._resuming = False
@@ -567,13 +570,21 @@ class TradingAgentsGraph:
         selection, debate/risk depth, or asset mode starts fresh instead of
         silently continuing the previous graph (#1089).
         """
-        return "|".join([
+        parts = [
             "analysts=" + ",".join(self.selected_analysts),
             f"debate={self.config['max_debate_rounds']}",
             f"risk={self.config['max_risk_discuss_rounds']}",
             f"asset={asset_type}",
             f"mandate={self.mandate_name}",
-        ])
+        ]
+        # A mandate's own analysts are graph shape too: without this, a run
+        # interrupted before a mandate gained analysts would resume into a graph
+        # with nodes its checkpoint never saw. Added only when present, so every
+        # other signature -- and every checkpoint keyed on one -- is unchanged.
+        mandate_analysts = self.mandate.analysts if self.mandate is not None else ()
+        if mandate_analysts:
+            parts.append("mandate_analysts=" + ",".join(a.key for a in mandate_analysts))
+        return "|".join(parts)
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):
         """Run the trading agents graph for a company on a specific date.
@@ -759,6 +770,7 @@ class TradingAgentsGraph:
             "sentiment_report": final_state["sentiment_report"],
             "news_report": final_state["news_report"],
             "fundamentals_report": final_state["fundamentals_report"],
+            "mandate_reports": dict(final_state.get("mandate_reports") or {}),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],

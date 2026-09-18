@@ -232,9 +232,19 @@ def mandate_section(state: Mapping[str, Any]) -> str:
 
     Lets an agent write ``{mandate_section}`` inline without leaving a stray
     blank line when no mandate is set.
+
+    Carries the mandate analysts' reports too. Every downstream agent already
+    interpolates this section, so a mandate analyst's findings reach the
+    researchers, trader, risk debate and portfolio manager with no edit to
+    their prompts.
     """
     context = get_mandate_context_from_state(state)
-    return f"{context}\n\n" if context else ""
+    if not context:
+        return ""
+    from tradingagents.mandates.graph import render_mandate_reports
+
+    reports = render_mandate_reports(state)
+    return f"{context}\n\n{reports}\n\n" if reports else f"{context}\n\n"
 
 
 def apply_mandate_to_system_message(

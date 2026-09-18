@@ -35,6 +35,12 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "fundamentals.md").write_text(final_state["fundamentals_report"], encoding="utf-8")
         analyst_parts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
+    from tradingagents.mandates.graph import iter_mandate_reports
+
+    for key, label, text in iter_mandate_reports(final_state):
+        analysts_dir.mkdir(exist_ok=True)
+        (analysts_dir / f"{key}.md").write_text(text, encoding="utf-8")
+        analyst_parts.append((label, text))
     if analyst_parts:
         content = "\n\n".join(f"### {name}\n{text}" for name, text in analyst_parts)
         sections.append(f"## I. Analyst Team Reports\n\n{content}")

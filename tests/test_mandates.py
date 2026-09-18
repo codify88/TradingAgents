@@ -183,6 +183,22 @@ def test_run_signature_separates_mandates():
     assert sig("equity_value") != sig("equity_momentum") != sig("")
 
 
+def test_run_signature_keys_on_the_mandates_own_analysts():
+    """Mandate analysts change the graph; a pre-analyst checkpoint must not resume."""
+    def sig(name):
+        g = _graph(name)
+        g.selected_analysts = ("market",)
+        g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
+        return g._run_signature("stock")
+
+    assert sig("equity_value").endswith("|mandate_analysts=quality,valuation")
+    # Mandates without analysts, and no mandate, keep their existing signature.
+    assert sig("equity_momentum") == (
+        "analysts=market|debate=1|risk=1|asset=stock|mandate=equity_momentum"
+    )
+    assert "mandate_analysts" not in sig("")
+
+
 # --- memory log round-trip ------------------------------------------------
 
 

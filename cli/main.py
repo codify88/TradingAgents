@@ -50,6 +50,7 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.mandates.graph import iter_mandate_reports
 from tradingagents.reporting import write_report_tree
 
 console = Console()
@@ -113,15 +114,35 @@ class MessageBuffer:
         self.current_agent = None
         self.report_sections = {}
         self.selected_analysts = []
+        self.mandate_analysts = []  # [(key, label)] added by the run's mandate
         self._processed_message_ids = set()
 
-    def init_for_analysis(self, selected_analysts):
+    @staticmethod
+    def mandate_section_key(key):
+        """Report-section name for a mandate analyst's report."""
+        return f"mandate:{key}"
+
+    def init_for_analysis(self, selected_analysts, mandate_analysts=()):
         """Initialize agent status and report sections based on selected analysts.
 
         Args:
             selected_analysts: List of analyst type strings (e.g., ["market", "news"])
+            mandate_analysts: ``Mandate.analysts`` for the run -- personas the
+                mandate adds after the selected analysts.
         """
         self.selected_analysts = [a.lower() for a in selected_analysts]
+        self.mandate_analysts = [(a.key, a.label) for a in mandate_analysts]
+
+        # Mandate analysts' sections slot in after upstream's analyst sections,
+        # so "latest section" and report ordering follow the graph's order. The
+        # instance attribute shadows the class mapping for this run only.
+        sections = {}
+        for section, spec in type(self).REPORT_SECTIONS.items():
+            sections[section] = spec
+            if section == "fundamentals_report":
+                for key, label in self.mandate_analysts:
+                    sections[self.mandate_section_key(key)] = (None, label)
+        self.REPORT_SECTIONS = sections
 
         # Build agent_status dynamically
         self.agent_status = {}
@@ -130,6 +151,8 @@ class MessageBuffer:
         for analyst_key in self.selected_analysts:
             if analyst_key in self.ANALYST_MAPPING:
                 self.agent_status[self.ANALYST_MAPPING[analyst_key]] = "pending"
+        for _, label in self.mandate_analysts:
+            self.agent_status[label] = "pending"
 
         # Add fixed teams
         for team_agents in self.FIXED_AGENTS.values():
@@ -211,9 +234,13 @@ class MessageBuffer:
                 "trader_investment_plan": "Trading Team Plan",
                 "final_trade_decision": "Portfolio Management Decision",
             }
-            self.current_report = (
-                f"### {section_titles[latest_section]}\n{latest_content}"
+            mandate_titles = {
+                self.mandate_section_key(k): label for k, label in self.mandate_analysts
+            }
+            title = section_titles.get(latest_section) or mandate_titles.get(
+                latest_section, latest_section
             )
+            self.current_report = f"### {title}\n{latest_content}"
 
         # Update the final complete report
         self._update_final_report()
@@ -223,7 +250,12 @@ class MessageBuffer:
 
         # Analyst Team Reports - use .get() to handle missing sections
         analyst_sections = ["market_report", "sentiment_report", "news_report", "fundamentals_report"]
-        if any(self.report_sections.get(section) for section in analyst_sections):
+        mandate_sections = [
+            (self.mandate_section_key(k), label) for k, label in self.mandate_analysts
+        ]
+        if any(self.report_sections.get(section) for section in analyst_sections) or any(
+            self.report_sections.get(section) for section, _ in mandate_sections
+        ):
             report_parts.append("## Analyst Team Reports")
             if self.report_sections.get("market_report"):
                 report_parts.append(
@@ -241,6 +273,9 @@ class MessageBuffer:
                 report_parts.append(
                     f"### Fundamentals Analysis\n{self.report_sections['fundamentals_report']}"
                 )
+            for section, label in mandate_sections:
+                if self.report_sections.get(section):
+                    report_parts.append(f"### {label}\n{self.report_sections[section]}")
 
         # Research Team Reports
         if self.report_sections.get("investment_plan"):
@@ -320,6 +355,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
             "Sentiment Analyst",
             "News Analyst",
             "Fundamentals Analyst",
+            *(label for _, label in message_buffer.mandate_analysts),
         ],
         "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
         "Trading Team": ["Trader"],
@@ -797,6 +833,7 @@ def display_complete_report(final_state):
         analysts.append(("News Analyst", final_state["news_report"]))
     if final_state.get("fundamentals_report"):
         analysts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
+    analysts.extend((label, text) for _, label, text in iter_mandate_reports(final_state))
     if analysts:
         console.print(Panel("[bold]I. Analyst Team Reports[/bold]", border_style="cyan"))
         for title, content in analysts:
@@ -904,6 +941,20 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
             found_active = True
         else:
             message_buffer.update_agent_status(agent_name, "pending")
+
+    # Mandate analysts run after the selected analysts, before the debate.
+    mandate_reports = chunk.get("mandate_reports") or {}
+    for key, label in message_buffer.mandate_analysts:
+        section = message_buffer.mandate_section_key(key)
+        if mandate_reports.get(key):
+            message_buffer.update_report_section(section, mandate_reports[key])
+        if message_buffer.report_sections.get(section):
+            message_buffer.update_agent_status(label, "completed")
+        elif not found_active:
+            message_buffer.update_agent_status(label, "in_progress")
+            found_active = True
+        else:
+            message_buffer.update_agent_status(label, "pending")
 
     # When all analysts complete, transition research team to in_progress
     if (
@@ -1043,7 +1094,10 @@ def run_analysis(checkpoint: bool | None = None):
     )
 
     # Initialize message buffer with selected analysts
-    message_buffer.init_for_analysis(selected_analyst_keys)
+    message_buffer.init_for_analysis(
+        selected_analyst_keys,
+        mandate_analysts=graph.mandate.analysts if graph.mandate is not None else (),
+    )
 
     # Track start time for elapsed display
     start_time = time.time()
