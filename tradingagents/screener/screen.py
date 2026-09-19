@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -142,7 +143,11 @@ def fundamental_exclusions(mandate: Mandate | None, symbol: str, as_of: str,
         if mandate.name == "equity_value":
             metrics = annual_metrics(fin)
             tripped = [s.name for s in quality_screens(metrics) if s.status == "TRIPPED"]
-            return tripped, _value_ordering(fin, frame)
+            try:
+                value = _value_ordering(fin, frame)
+            except Exception as exc:
+                return [f"value ordering unavailable ({exc})"], float("nan")
+            return tripped, value
 
         if mandate.name == "equity_momentum":
             trajectory = gr.growth_trajectory(fin)
@@ -161,6 +166,7 @@ def fundamental_exclusions(mandate: Mandate | None, symbol: str, as_of: str,
 # Deliberately one number per mandate, named in the manifest, so whatever bias
 # the ordering introduces is visible rather than buried in a composite score.
 
+NO_ORDERING_VALUE = "no ordering value: the mandate's ranking signal cannot place this name"
 VALUE_ORDERING = "FCF yield percentile against the company's own ten-year history (high = cheap vs itself)"
 MOMENTUM_ORDERING = "12-month excess total return over SPY"
 
@@ -179,25 +185,39 @@ def _long_prices(fin) -> pd.Series:
     return price_history(fin.ticker, fin.annual.index[0] - pd.Timedelta(days=10), fin.as_of)
 
 
+# Waits before re-asking for a price history that came back empty: Yahoo answers
+# a throttled request with nothing rather than an error.
+ORDERING_RETRY_DELAYS = (20.0, 40.0)
+
+
 def _value_ordering(fin, frame: pd.DataFrame) -> float:
     """Where today's FCF yield sits in the company's own ten-year range.
 
     Against its own history, not against other companies: a cross-sectional
     cheapness rank would mostly sort by sector, and this mandate's question is
     whether *this* business is cheap relative to how it has been priced.
+
+    NaN when the company's own record cannot place it (no FCF history, no
+    market cap). A price history that stays empty after the retries raises
+    instead: that is the vendor, not the company, and the caller must say so
+    rather than let a NaN pass for a fact.
     """
-    try:
+    closes = _long_prices(fin)
+    for delay in ORDERING_RETRY_DELAYS:
+        if not closes.empty:
+            break
+        time.sleep(delay)
         closes = _long_prices(fin)
-        current = val.snapshot(fin, closes)
-        history = val.historical_multiples(fin, closes)
-        if current is None or history.empty or "fcf_yield" not in history:
-            return float("nan")
-        if math.isnan(current.market_cap) or current.market_cap <= 0:
-            return float("nan")
-        today = current.ttm_fcf / current.market_cap
-        return val.percentile_in_history(today, history["fcf_yield"])
-    except Exception:
+    if closes.empty:
+        raise RuntimeError(f"no price history for {fin.ticker}")
+    current = val.snapshot(fin, closes)
+    history = val.historical_multiples(fin, closes)
+    if current is None or history.empty or "fcf_yield" not in history:
         return float("nan")
+    if math.isnan(current.market_cap) or current.market_cap <= 0:
+        return float("nan")
+    today = current.ttm_fcf / current.market_cap
+    return val.percentile_in_history(today, history["fcf_yield"])
 
 
 def _momentum_ordering(frame: pd.DataFrame, bench: pd.DataFrame) -> float:
@@ -300,11 +320,19 @@ def run_screen(
             excluded[symbol] = rules
             reasons[rules[0]] += 1
             continue
-        eligible.append(symbol)
-        ordering[symbol] = (
+        value = (
             value if mandate and mandate.name == "equity_value"
             else _momentum_ordering(frames[symbol], bench)
         )
+        if mandate and math.isnan(value):
+            # A name the ordering cannot place can be neither a pick nor a
+            # control: in the control pool it would make the comparison
+            # "ranked vs unrankable" instead of "ranked high vs ranked low".
+            excluded[symbol] = [NO_ORDERING_VALUE]
+            reasons[NO_ORDERING_VALUE] += 1
+            continue
+        eligible.append(symbol)
+        ordering[symbol] = value
     tiers.append(TierStat("fundamental", len(examined), len(eligible), dict(reasons)))
 
     # --- ordering, then a control drawn from what the ordering rejected ---

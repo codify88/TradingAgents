@@ -228,8 +228,27 @@ def _load_alpha_vantage(ticker: str, as_of: str) -> Financials:
 # --- prices -----------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=64)
+class _NoPriceRows(Exception):
+    """Yahoo answered with nothing -- raised so the empty answer is never cached."""
+
+
 def _price_history(symbol: str, start: str, end: str) -> pd.Series:
+    """Closes from Yahoo, or an empty series; only a non-empty answer is cached.
+
+    Yahoo answers a throttled request with an empty frame, not an error. Caching
+    that for the life of the process turned one throttled call into "no price
+    history" for every later use of the ticker -- a sweep's remaining cells, or
+    a screen's ordering (the 2023-09-01 value screen lost 11 of 17 names' ordering
+    values that way, and those names could then only be controls).
+    """
+    try:
+        return _price_history_cached(symbol, start, end)
+    except _NoPriceRows:
+        return pd.Series(dtype=float)
+
+
+@functools.lru_cache(maxsize=64)
+def _price_history_cached(symbol: str, start: str, end: str) -> pd.Series:
     import yfinance as yf
 
     from tradingagents.dataflows.symbol_utils import normalize_symbol
@@ -241,7 +260,7 @@ def _price_history(symbol: str, start: str, end: str) -> pd.Series:
         start=start, end=end, auto_adjust=False,
     )
     if hist is None or hist.empty or "Close" not in hist:
-        return pd.Series(dtype=float)
+        raise _NoPriceRows(symbol)
     close = hist["Close"].astype(float)
     if getattr(close.index, "tz", None) is not None:
         close.index = close.index.tz_localize(None)

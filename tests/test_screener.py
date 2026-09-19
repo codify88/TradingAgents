@@ -511,3 +511,71 @@ class TestReviewReadsWhereOutcomesLand:
         assert len(decision_logs(config)) == 2
         out = render_performance(config)
         assert "| r1 | momentum | 2026-09-17 | 1/1 | +5.0% | 1/1 | -1.0% | +6.0% |" in out
+
+
+# --- ordering under a flaky price vendor --------------------------------------
+
+
+class TestOrderingFailures:
+    """The 2023-09-01 value screen lost 11 of 17 names' ordering values to a
+    throttled price vendor. Those names could not be ranked, so the picks were
+    whichever names the throttle spared, and every control was one it hit."""
+
+    def test_a_price_history_that_stays_empty_excludes_the_name_with_a_reason(self, monkeypatch):
+        monkeypatch.setattr(screen, "ORDERING_RETRY_DELAYS", (0.0, 0.0))
+        fin = type("F", (), {"ticker": "X"})()
+        monkeypatch.setattr(screen, "load_financials", lambda s, d: fin)
+        monkeypatch.setattr(screen, "quality_screens", lambda m: [])
+        monkeypatch.setattr(screen, "annual_metrics", lambda f: None)
+        calls = []
+        monkeypatch.setattr(screen, "_long_prices", lambda f: calls.append(1) or pd.Series(dtype=float))
+        rules, value = screen.fundamental_exclusions(get_mandate("equity_value"), "X", "2023-09-01", _frame())
+        assert rules and rules[0].startswith("value ordering unavailable")
+        assert len(calls) == 1 + len(screen.ORDERING_RETRY_DELAYS)
+
+    def test_an_empty_price_history_is_retried_before_giving_up(self, monkeypatch):
+        monkeypatch.setattr(screen, "ORDERING_RETRY_DELAYS", (0.0, 0.0))
+        answers = iter([pd.Series(dtype=float), pd.Series([1.0], index=[pd.Timestamp("2023-08-31")])])
+        monkeypatch.setattr(screen, "_long_prices", lambda f: next(answers))
+        monkeypatch.setattr(screen.val, "snapshot", lambda f, c: None)
+        monkeypatch.setattr(screen.val, "historical_multiples", lambda f, c: pd.DataFrame())
+        fin = type("F", (), {"ticker": "X"})()
+        assert math.isnan(screen._value_ordering(fin, _frame()))  # reached the data, no raise
+
+    def test_names_the_ordering_cannot_place_are_neither_picks_nor_controls(self, monkeypatch):
+        symbols = [f"S{i:02d}" for i in range(12)]
+        frames = {s: _frame() for s in symbols}
+        frames["SPY"] = _frame()
+        unplaced = set(symbols[6:])
+        ordering = {id(frames[s]): (float("nan") if s in unplaced else float(i))
+                    for i, s in enumerate(symbols)}
+        result = _run(monkeypatch, symbols, frames, ordering=ordering,
+                      picks=3, controls=3, control_seed=1)
+        chosen = set(result.manifest.pick_symbols) | set(result.manifest.control_symbols)
+        assert not (chosen & unplaced)
+        assert len(result.manifest.control_symbols) == 3
+        assert all(result.excluded[s] == [screen.NO_ORDERING_VALUE] for s in unplaced)
+
+
+class TestPriceHistoryCache:
+    def test_an_empty_answer_is_not_cached(self, monkeypatch):
+        """Yahoo answers a throttled request with an empty frame. Cached, that
+        became "no history" for the rest of the process."""
+        from tradingagents.mandates.tools import financials as fin
+
+        fin._price_history_cached.cache_clear()
+        full = pd.DataFrame({"Close": [10.0, 11.0]}, index=pd.to_datetime(["2023-08-30", "2023-08-31"]))
+        answers = iter([pd.DataFrame(), full])
+
+        class _Ticker:
+            def __init__(self, symbol):
+                pass
+
+            def history(self, **kw):
+                return next(answers)
+
+        import yfinance
+        monkeypatch.setattr(yfinance, "Ticker", _Ticker)
+        assert fin._price_history("ZZZ", "2023-01-01", "2023-09-01").empty
+        assert list(fin._price_history("ZZZ", "2023-01-01", "2023-09-01")) == [10.0, 11.0]
+        fin._price_history_cached.cache_clear()
