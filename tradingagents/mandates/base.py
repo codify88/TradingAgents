@@ -81,6 +81,11 @@ class Mandate:
     # mandate narrows one role -- the Trader's stop-loss habit, the Conservative
     # debater's volatility framing -- without editing that agent's upstream prompt.
     agent_guidance: dict[str, str] = field(default_factory=dict)
+    # The mandate this one is an overlay of, or "". An overlay decides direction
+    # exactly as its base does and adds a choice of its own (LEAPS: stock or
+    # call), so its decisions can stand in for the base's wherever only the
+    # direction is scored -- a screen's picks-vs-control comparison.
+    base: str = ""
 
     # --- extra analysts -------------------------------------------------------
     # Personas this mandate adds after upstream's analysts, each with its own

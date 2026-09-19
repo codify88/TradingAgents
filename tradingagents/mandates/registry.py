@@ -21,6 +21,22 @@ _MANDATES: dict[str, Mandate] = {
 }
 
 
+def serves(decision_mandate: str | None, screen_mandate: str | None) -> bool:
+    """Whether a decision made under ``decision_mandate`` counts for ``screen_mandate``.
+
+    The same mandate, or an overlay of it (``Mandate.base``): the overlay's
+    rating is the base's rating, so a screen scored on direction may use it.
+    """
+    decision, screen = decision_mandate or "", screen_mandate or ""
+    if decision == screen:
+        return True
+    try:
+        m = get_mandate(decision)
+    except ValueError:
+        return False
+    return bool(m and screen and m.base == screen)
+
+
 def list_mandates() -> list[Mandate]:
     """Every registered mandate, in registration order."""
     return list(_MANDATES.values())

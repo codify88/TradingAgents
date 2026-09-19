@@ -18,6 +18,7 @@ from pathlib import Path
 
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.utils import get_current_date
+from tradingagents.mandates import get_mandate
 
 from .manifest import ScreenManifest, load_manifests
 
@@ -51,12 +52,33 @@ def names(manifest: ScreenManifest) -> list[str]:
     return list(dict.fromkeys(manifest.pick_symbols + manifest.control_symbols))
 
 
-def remaining(manifest: ScreenManifest, config: dict) -> list[str]:
-    """Names the loop has not yet decided for this screen."""
+def effective_mandate(manifest: ScreenManifest, mandate: str | None = None) -> str:
+    """The mandate a screen's names are run under: its own, or an overlay of it.
+
+    Only an overlay (``Mandate.base``) may stand in: it decides direction as the
+    screen's mandate does, so the picks-vs-control comparison still holds. Any
+    other mandate would be running the screen's names through a different
+    thesis, and screen-review would compare nothing.
+    """
+    screen = manifest.mandate or ""
+    if not mandate or mandate == screen:
+        return screen
+    m = get_mandate(mandate)
+    if m is None or m.base != screen:
+        raise ValueError(
+            f"{mandate!r} is not an overlay of this screen's mandate {screen!r}; "
+            f"a screen can only be run under its own mandate or an overlay of it"
+        )
+    return mandate
+
+
+def remaining(manifest: ScreenManifest, config: dict, mandate: str | None = None) -> list[str]:
+    """Names the loop has not yet decided for this screen, under ``mandate`` if given."""
+    run_as = effective_mandate(manifest, mandate)
     done = {
         e["ticker"]
         for e in TradingMemoryLog({"memory_log_path": str(sweep_log_path(manifest, config))}).load_entries()
-        if e["date"] == manifest.as_of and (e.get("mandate") or "") == (manifest.mandate or "")
+        if e["date"] == manifest.as_of and (e.get("mandate") or "") == run_as
     }
     return [n for n in names(manifest) if n not in done]
 
@@ -84,17 +106,20 @@ def config_for(manifest: ScreenManifest, config: dict) -> dict:
 class Plan:
     manifest: ScreenManifest
     todo: list[str]
+    mandate: str = ""   # what the names run under: the screen's mandate or an overlay
 
     @property
     def minutes(self) -> int:
         return len(self.todo) * MINUTES_PER_CELL
 
 
-def plan(manifest: ScreenManifest, config: dict) -> Plan:
-    return Plan(manifest, remaining(manifest, config))
+def plan(manifest: ScreenManifest, config: dict, mandate: str | None = None) -> Plan:
+    run_as = effective_mandate(manifest, mandate)
+    return Plan(manifest, remaining(manifest, config, run_as), run_as)
 
 
-def run(manifest: ScreenManifest, config: dict, selected_analysts=None, runner=None):
+def run(manifest: ScreenManifest, config: dict, selected_analysts=None, runner=None,
+        mandate: str | None = None):
     """Adjudicate a screen's picks and controls; returns the backtest result.
 
     Cells already decided are skipped by the sweep itself, so an interrupted
@@ -103,7 +128,7 @@ def run(manifest: ScreenManifest, config: dict, selected_analysts=None, runner=N
     if runner is None:
         from tradingagents.backtest import run_backtest as runner
 
-    kwargs = {"mandate": manifest.mandate or "", "run_id": sweep_id(manifest)}
+    kwargs = {"mandate": effective_mandate(manifest, mandate), "run_id": sweep_id(manifest)}
     if selected_analysts:
         kwargs["selected_analysts"] = list(selected_analysts)
     return runner(names(manifest), [manifest.as_of], config_for(manifest, config), **kwargs)
@@ -125,7 +150,14 @@ def find(config: dict, screen_id: str) -> ScreenManifest:
                      + ", ".join(m.run_id for m in matches))
 
 
-def unfinished(config: dict, mandate: str | None = None) -> list[Plan]:
-    """Every saved screen with names the loop has not decided yet, oldest first."""
-    plans = [plan(m, config) for m in load_manifests(config, mandate)]
+def unfinished(config: dict, mandate: str | None = None, run_as: str | None = None) -> list[Plan]:
+    """Every saved screen with names the loop has not decided yet, oldest first.
+
+    With ``run_as`` (an overlay), only the screens it can stand in for.
+    """
+    manifests = load_manifests(config, mandate)
+    if run_as:
+        base = get_mandate(run_as).base
+        manifests = [m for m in manifests if (m.mandate or "") == base]
+    plans = [plan(m, config, run_as) for m in manifests]
     return [p for p in plans if p.todo]

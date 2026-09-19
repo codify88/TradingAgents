@@ -1645,12 +1645,13 @@ def _run_screen_plan(plan, analysts: str | None) -> None:
     picks = [n for n in plan.todo if n in m.pick_symbols]
     controls = [n for n in plan.todo if n not in m.pick_symbols]
     console.print(
-        f"[cyan]Screen {m.run_id}[/cyan] ({m.mandate or 'no mandate'}, as of {m.as_of}): "
+        f"[cyan]Screen {m.run_id}[/cyan] ({plan.mandate or 'no mandate'}, as of {m.as_of}): "
         f"{len(plan.todo)} names to decide -- picks {', '.join(picks) or 'none'}; "
         f"controls {', '.join(controls) or 'none'}. About {plan.minutes} minutes."
     )
     try:
-        result = screen_run.run(m, DEFAULT_CONFIG, _analyst_list(analysts), runner=run_backtest)
+        result = screen_run.run(m, DEFAULT_CONFIG, _analyst_list(analysts), runner=run_backtest,
+                                mandate=plan.mandate)
     except Exception as exc:  # a missing key or an unknown analyst is a setup error
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from None
@@ -1679,6 +1680,11 @@ def screen_run_command(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would run and roughly how long, then stop."
     ),
+    run_as: str = typer.Option(
+        None, "--as",
+        help="Run the names under an overlay of the screen's mandate, e.g. "
+             "equity_momentum_leaps; screen-review still counts them for the screen.",
+    ),
 ):
     """Run a saved screen's shortlist and control through the agent loop.
 
@@ -1692,8 +1698,9 @@ def screen_run_command(
         console.print("[red]Give a screen id, or --all -- not both, not neither.[/red]")
         raise typer.Exit(code=1)
     try:
-        plans = (screen_run.unfinished(DEFAULT_CONFIG, mandate) if all_
-                 else [screen_run.plan(screen_run.find(DEFAULT_CONFIG, screen_id), DEFAULT_CONFIG)])
+        plans = (screen_run.unfinished(DEFAULT_CONFIG, mandate, run_as) if all_
+                 else [screen_run.plan(screen_run.find(DEFAULT_CONFIG, screen_id), DEFAULT_CONFIG,
+                                       run_as)])
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from None

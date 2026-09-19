@@ -505,6 +505,12 @@ class TestReviewReadsWhereOutcomesLand:
         picks, _ = score_manifest(_manifest(["AAA"], []), _Log([other, unmandated]))
         assert picks.settled == 0 and picks.pending == 1
 
+    def test_an_overlays_decision_is_scored_for_its_base_screen(self):
+        """A momentum screen run under equity_momentum_leaps (screen-run --as)."""
+        leaps = {**_entry("AAA", "+4.0%"), "mandate": "equity_momentum_leaps"}
+        picks, _ = score_manifest(_manifest(["AAA"], []), _Log([leaps]))
+        assert picks.settled == 1
+
     def test_entries_are_pooled_across_logs(self):
         picks, control = score_manifest(
             _manifest(["AAA"], ["BBB"]), _Log([_entry("AAA", "+5.0%")]), _Log([_entry("BBB", "-1.0%")]))

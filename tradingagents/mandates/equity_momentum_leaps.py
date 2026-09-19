@@ -27,6 +27,7 @@ _INSTRUMENT_RULE = (
 EQUITY_MOMENTUM_LEAPS = replace(
     EQUITY_MOMENTUM,
     name="equity_momentum_leaps",
+    base=EQUITY_MOMENTUM.name,
     label="Long-Term Equity - Growth / Momentum, held through LEAPS",
     description=(
         EQUITY_MOMENTUM.description

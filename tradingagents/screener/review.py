@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.mandates.registry import serves
 
 from .manifest import ScreenManifest, load_manifests
 
@@ -134,7 +135,7 @@ def _group(
         # different horizon, and says nothing about this screen.
         matches = [e for e in entries
                    if e["ticker"] == symbol and e["date"] == as_of
-                   and (e.get("mandate") or "") == (mandate or "")
+                   and serves(e.get("mandate"), mandate)
                    and not e.get("superseded")]
         if not matches:
             pending += 1

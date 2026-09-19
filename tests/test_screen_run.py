@@ -245,3 +245,49 @@ def test_the_state_log_keeps_the_mandate_analysts_reports(tmp_path):
     written = json.loads(next(tmp_path.rglob("full_states_log*.json")).read_text(encoding="utf-8"))
     assert written["mandate_reports"] == {"momentum": "Trend intact above the rising 50-day.",
                                           "growth": "Revisions up."}
+
+
+# --- running a screen under an overlay (LEAPS) ------------------------------------------
+
+
+class TestOverlay:
+    """equity_momentum_leaps decides direction exactly as equity_momentum, so a
+    momentum screen may be run under it and still be scored as a momentum screen."""
+
+    def test_serves(self):
+        from tradingagents.mandates import serves
+
+        assert serves("equity_momentum", "equity_momentum")
+        assert serves("equity_momentum_leaps", "equity_momentum")
+        assert not serves("equity_momentum", "equity_momentum_leaps")
+        assert not serves("equity_value", "equity_momentum")
+        assert not serves("equity_momentum_leaps", "equity_value")
+        assert not serves("equity_momentum_leaps", "")
+
+    def test_the_names_run_under_the_overlay(self, config):
+        calls = {}
+        sr.run(_manifest(), config, runner=lambda t, d, c, **kw: calls.update(kw),
+               mandate="equity_momentum_leaps")
+        assert calls["mandate"] == "equity_momentum_leaps"
+        assert calls["run_id"] == "scr_20220301_momentum_101500"
+
+    def test_only_an_overlay_of_the_screens_mandate_may_stand_in(self, config):
+        with pytest.raises(ValueError, match="not an overlay"):
+            sr.plan(_manifest(), config, "equity_value")
+        with pytest.raises(ValueError, match="not an overlay"):
+            sr.plan(_manifest(mandate="equity_value"), config, "equity_momentum_leaps")
+
+    def test_resuming_counts_only_the_overlays_own_decisions(self, config):
+        """Names decided under plain momentum are not yet decided under LEAPS."""
+        m = _manifest()
+        _decide(config, m, "AAA")                                   # plain momentum
+        _decide(config, m, "BBB", mandate="equity_momentum_leaps")
+        assert sr.plan(m, config).todo == ["BBB", "CCC"]
+        assert sr.plan(m, config, "equity_momentum_leaps").todo == ["AAA", "CCC"]
+
+    def test_all_selects_only_screens_the_overlay_can_serve(self, config, monkeypatch):
+        momentum, value = _manifest(), _manifest(run_id="2022-03-01_equity_value_1", mandate="equity_value")
+        monkeypatch.setattr(sr, "load_manifests", lambda cfg, mandate=None: [momentum, value])
+        plans = sr.unfinished(config, run_as="equity_momentum_leaps")
+        assert [p.manifest.run_id for p in plans] == [momentum.run_id]
+        assert plans[0].mandate == "equity_momentum_leaps"
