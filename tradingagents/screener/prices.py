@@ -169,6 +169,47 @@ def download(
     return data
 
 
+def download_av(
+    symbols: list[str], start: str, end: str, limiter=None, attempts: int = 3,
+) -> PriceData:
+    """Daily bars per symbol from Alpha Vantage, one request per name, same columns as :func:`download`.
+
+    The screen's price tier, since two runs of one screen on Yahoo disagreed:
+    Yahoo throttles a bulk download by dropping symbols, differently each time
+    (the 2025-09-02 momentum screen passed 630 names through this tier on one
+    run and 650 on the next, with nothing else running). Alpha Vantage answers
+    the same way every time, costs one request per name -- paced by
+    ``limiter`` and skipped when today's answer is already on disk -- and keeps
+    the history of names that have since delisted, so no separate fallback is
+    needed.
+
+    An empty answer is a fact about the symbol (no history), an exception that
+    survives the retries is the vendor (``unavailable``) -- the distinction the
+    outage guard depends on.
+    """
+    from tradingagents.mandates.tools.financials import alpha_vantage_daily_strict, daily_is_cached
+
+    from .throttle import with_retry
+
+    data = PriceData()
+    lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+    for symbol in symbols:
+        if limiter is not None and not daily_is_cached(symbol):
+            limiter.acquire(1)
+        try:
+            frame = with_retry(lambda s=symbol: alpha_vantage_daily_strict(s), attempts=attempts)
+        except Exception as exc:
+            logger.warning("price history unavailable for %s: %s", symbol, exc)
+            data.unavailable.add(symbol)
+            continue
+        if frame.empty:
+            continue
+        frame = frame[(frame.index >= lo) & (frame.index < hi)]
+        if not frame.empty:
+            data.frames[symbol] = frame[["Open", "High", "Low", "Close", "Volume"]]
+    return data
+
+
 def _extract(raw: pd.DataFrame, symbols: list[str], data: PriceData) -> None:
     """Pull each symbol's frame out of a (multi-symbol) yfinance download."""
     for symbol in symbols:

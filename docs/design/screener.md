@@ -79,9 +79,19 @@ those: ZION+O, AEP+PZ) or by the filed name. Checked against the full listing
 for false positives: class shares (GOOGL), "Preferred Bank" and a royalty
 trust's units (MARPS) are kept.
 
-A partial price batch also gets a second look before its missing symbols are
-believed: Yahoo throttles inside a batch, and a throttled symbol once read as
-"no price history".
+Prices come from Alpha Vantage, one request per name, not from Yahoo's bulk
+download. Yahoo throttled the bulk download by silently dropping symbols,
+differently each run: the same 2025-09-02 momentum screen passed 630 names
+through the price tier once and 650 the next time, with nothing else running,
+and a 2024-03-01 value screen lost 35 of its 60 finalists to "Too Many
+Requests". Alpha Vantage answers the same way every time and raises on a
+failure rather than returning nothing, so a vendor problem is counted as
+unavailable instead of read as "no price history". The cost is time -- ~5,300
+requests, about 27 minutes at the screen's pace -- so each day's answers are
+kept on disk (`<data_cache_dir>/av_daily/`, purged after three days) and a
+rerun, or another date's screen, pays only for what is missing. The ten-year
+price history behind the value ordering reads the same source, split-adjusted
+but not dividend-adjusted, as a market capitalisation needs.
 
 ## Survivorship
 
@@ -91,7 +101,7 @@ history is a study of survivors. Four places could drop them:
 | Stage | Problem | Now |
 |---|---|---|
 | universe | today's listings exclude everything delisted since | listings as of the screen date (`LISTING_STATUS date=`); gone-since names are marked |
-| price | Yahoo drops a ticker's history when it delists | marked names fall back to Alpha Vantage, which keeps it |
+| price | Yahoo drops a ticker's history when it delists | prices come from Alpha Vantage, which keeps it |
 | fundamentals | Alpha Vantage returns empty statements for delisted companies | read from SEC EDGAR; what EDGAR cannot answer (IFRS filers, ambiguous names) is excluded with that reason, and counted |
 | grading | no prices, so the decision never settles | Alpha Vantage prices; a name delisted mid-horizon settles at its last trade |
 
@@ -116,10 +126,11 @@ screen counts what remains in its Survivorship note.
 A vendor outage and a dead company look identical in a dict of price frames.
 yfinance throttling once returned empty for every symbol, and an earlier version
 reported that as 6,052 companies having no price history while still emitting a
-confident shortlist from what leaked through. A batch empty for *every* symbol is
-now treated as a vendor failure, retried with backoff, and reported separately;
-above 25% of the universe unreachable the run withholds the shortlist entirely
-and spends no API budget.
+confident shortlist from what leaked through. A vendor failure is now retried
+and then reported separately from "no price history"; above 5% of the universe
+unreachable the run withholds the shortlist entirely and spends no fundamentals
+budget. (The bar was 25% while the price tier was Yahoo, where some loss was
+routine; at 5% a few missing names already changed which six were picked.)
 
 Alpha Vantage's measured ceiling on the key this was built against is ~257
 requests per minute. The fundamentals tier is paced below that and retries a

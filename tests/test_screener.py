@@ -34,6 +34,26 @@ HHH,Theta Inc,NYSE,Stock,,null,Active
 """
 
 
+@pytest.fixture(autouse=True)
+def _no_vendor_no_disk(monkeypatch):
+    """No screener test reaches Alpha Vantage or writes to the real cache.
+
+    A run_screen test once enabled the disk cache at ~/.tradingagents/cache and
+    fetched SPY live, because the benchmark download was left unstubbed.
+    """
+    import contextlib
+
+    from tradingagents.mandates.tools import financials as fin
+
+    monkeypatch.setattr(screen, "daily_disk_cache", lambda d: contextlib.nullcontext())
+
+    def _offline(*a, **k):
+        raise RuntimeError("network call in a screener test")
+
+    monkeypatch.setattr(fin, "_make_api_request", _offline)
+
+
+
 def _frame(n=300, price=50.0, volume=1e6, rising=True, step=0.05):
     idx = pd.bdate_range("2025-01-01", periods=n)
     step = step if rising else -step
@@ -149,7 +169,7 @@ def _run(monkeypatch, universe_symbols, frames, tripped=(), ordering=None, **kwa
         lambda as_of, limit=None: [universe.Candidate(s, s, "NYSE", "2010-01-01")
                                    for s in universe_symbols])
     monkeypatch.setattr(
-        screen.prices, "download",
+        screen.prices, "download_av",
         lambda syms, start, end, **kw: prices.PriceData(
             frames={s: frames[s] for s in syms if s in frames}))
     monkeypatch.setattr(
@@ -440,7 +460,7 @@ class TestVendorFailureIsNotAFinding:
         # Only two of twenty answer; the rest are a vendor failure.
         good = {s: _frame() for s in symbols[:2]}
         monkeypatch.setattr(
-            screen.prices, "download",
+            screen.prices, "download_av",
             lambda syms, start, end, **kw: prices.PriceData(
                 frames={s: good[s] for s in syms if s in good},
                 unavailable={s for s in syms if s not in good},
@@ -463,7 +483,7 @@ class TestVendorFailureIsNotAFinding:
             lambda as_of, limit=None: [universe.Candidate(s, s, "NYSE", "2010-01-01")
                                        for s in symbols])
         monkeypatch.setattr(
-            screen.prices, "download",
+            screen.prices, "download_av",
             lambda syms, start, end, **kw: prices.PriceData(
                 frames={s: _frame() for s in syms[:2]},
                 unavailable=set(syms[2:])))
@@ -576,6 +596,7 @@ class TestPriceHistoryCache:
 
         import yfinance
         monkeypatch.setattr(yfinance, "Ticker", _Ticker)
+        fin.alpha_vantage_daily_strict.cache_clear()  # Alpha Vantage first: offline here, so Yahoo answers
         assert fin._price_history("ZZZ", "2023-01-01", "2023-09-01").empty
         assert list(fin._price_history("ZZZ", "2023-01-01", "2023-09-01")) == [10.0, 11.0]
         fin._price_history_cached.cache_clear()

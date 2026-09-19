@@ -11,10 +11,14 @@ easier, not harder (docs/design/mandates.md, rule 3).
 
 from __future__ import annotations
 
+import contextlib
 import functools
+import gzip
 import json
 import logging
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
@@ -233,7 +237,11 @@ class _NoPriceRows(Exception):
 
 
 def _price_history(symbol: str, start: str, end: str) -> pd.Series:
-    """Closes from Yahoo, or an empty series; only a non-empty answer is cached.
+    """Split-adjusted closes, Alpha Vantage first, Yahoo second, or an empty series.
+
+    Alpha Vantage answers the same way every time on this key; Yahoo throttles,
+    and under a screen's load it did so often enough that two runs of one screen
+    disagreed. Yahoo stays as the fallback for anything Alpha Vantage lacks.
 
     Yahoo answers a throttled request with an empty frame, not an error. Caching
     that for the life of the process turned one throttled call into "no price
@@ -241,6 +249,16 @@ def _price_history(symbol: str, start: str, end: str) -> pd.Series:
     a screen's ordering (the 2023-09-01 value screen lost 11 of 17 names' ordering
     values that way, and those names could then only be controls).
     """
+    try:
+        frame = alpha_vantage_daily_strict(symbol)
+    except Exception:
+        frame = pd.DataFrame()
+    if not frame.empty:
+        lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+        close = frame["Split Close"]
+        close = close[(close.index >= lo) & (close.index < hi)].dropna()
+        if not close.empty:
+            return close
     try:
         return _price_history_cached(symbol, start, end)
     except _NoPriceRows:
@@ -325,6 +343,66 @@ def overview(ticker: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+# Where a day's Alpha Vantage daily histories are kept on disk, or None (off).
+# A screen asks for ~5,300 of them, and its reruns and its other dates ask for
+# the same ones again; the same day's answer is the same answer. Off by default
+# so nothing but a caller that opts in (the screener) writes to disk -- tests
+# stub the vendor per symbol and must never read another test's answer back.
+_daily_cache_dir: Path | None = None
+DAILY_CACHE_KEEP_DAYS = 3
+
+
+@contextlib.contextmanager
+def daily_disk_cache(directory):
+    """Keep daily histories under ``directory`` for the duration of the block.
+
+    Restores whatever was set before on exit, so a screen run inside a longer
+    process -- or a test -- leaves no process-wide cache switched on behind it.
+    """
+    global _daily_cache_dir
+    previous = _daily_cache_dir
+    _daily_cache_dir = Path(directory) / "av_daily" if directory else None
+    if _daily_cache_dir is not None:
+        _daily_cache_dir.mkdir(parents=True, exist_ok=True)
+        cutoff = time.time() - DAILY_CACHE_KEEP_DAYS * 86400
+        for old in _daily_cache_dir.glob("*.csv.gz"):
+            if old.stat().st_mtime < cutoff:
+                old.unlink(missing_ok=True)
+    try:
+        yield
+    finally:
+        _daily_cache_dir = previous
+
+
+def _cached_daily_path(symbol: str) -> Path | None:
+    if _daily_cache_dir is None:
+        return None
+    return _daily_cache_dir / f"{symbol}.csv.gz"
+
+
+def daily_is_cached(symbol: str) -> bool:
+    """Whether today's history for ``symbol`` is already on disk (no request needed)."""
+    path = _cached_daily_path(symbol.strip().upper())
+    return bool(path and path.exists()
+                and pd.Timestamp(path.stat().st_mtime, unit="s").date() == pd.Timestamp.now().date())
+
+
+def _daily_csv(symbol: str):
+    """The TIME_SERIES_DAILY_ADJUSTED body for ``symbol``, from today's disk copy if any."""
+    path = _cached_daily_path(symbol)
+    if path is not None and daily_is_cached(symbol):
+        return gzip.decompress(path.read_bytes()).decode()
+    body = _make_api_request(
+        "TIME_SERIES_DAILY_ADJUSTED",
+        {"symbol": symbol, "outputsize": "full", "datatype": "csv"},
+    )
+    if path is not None and isinstance(body, str) and body.startswith("timestamp,"):
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(gzip.compress(body.encode()))
+        tmp.replace(path)
+    return body
+
+
 @functools.lru_cache(maxsize=512)
 def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
     """As :func:`alpha_vantage_daily`, but a vendor failure raises.
@@ -338,10 +416,7 @@ def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
     import csv
     import io
 
-    body = _make_api_request(
-        "TIME_SERIES_DAILY_ADJUSTED",
-        {"symbol": symbol.strip().upper(), "outputsize": "full", "datatype": "csv"},
-    )
+    body = _daily_csv(symbol.strip().upper())
     if not isinstance(body, str) or body.lstrip().startswith("{"):
         return pd.DataFrame()  # a JSON body here is "no such symbol", an answer
     rows = list(csv.DictReader(io.StringIO(body)))
@@ -349,8 +424,18 @@ def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
         return pd.DataFrame()
     frame = pd.DataFrame(rows).set_index("timestamp")
     frame.index = pd.to_datetime(frame.index)
+    frame = frame.sort_index()
     raw = frame[["open", "high", "low", "close", "adjusted_close", "volume"]].astype(float)
     factor = raw["adjusted_close"] / raw["close"].where(raw["close"] > 0)
+    # Split-only adjustment: each close divided by every split that came after
+    # it. A market capitalisation needs this -- statements restate share counts
+    # for splits but not for dividends -- where a return series needs Close.
+    if "split_coefficient" in frame:
+        splits = pd.to_numeric(frame["split_coefficient"], errors="coerce").fillna(1.0).replace(0.0, 1.0)
+        later = splits[::-1].cumprod()[::-1].shift(-1, fill_value=1.0)
+        split_close = raw["close"] / later
+    else:
+        split_close = raw["close"]
     out = pd.DataFrame({
         "Open": raw["open"] * factor,
         "High": raw["high"] * factor,
@@ -363,6 +448,7 @@ def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
         "Raw High": raw["high"],
         "Raw Low": raw["low"],
         "Raw Close": raw["close"],
+        "Split Close": split_close,
     })
     return out.dropna(subset=["Close"]).sort_index()
 

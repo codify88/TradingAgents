@@ -19,10 +19,12 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.mandates import Mandate, get_mandate
 from tradingagents.mandates.tools import growth as gr, momentum as mo, valuation as val
 from tradingagents.mandates.tools.financials import (
     FinancialsUnavailable,
+    daily_disk_cache,
     load_financials,
     price_history,
 )
@@ -53,7 +55,7 @@ BENCHMARK = "SPY"
 # Above this share of the universe unreachable, a shortlist is not a screen: it
 # is whatever leaked through an outage. The run still reports its funnel, so the
 # failure is visible, but it refuses to name picks.
-MAX_UNAVAILABLE_FRACTION = 0.25
+MAX_UNAVAILABLE_FRACTION = 0.05
 
 
 @dataclass
@@ -243,7 +245,20 @@ def run_screen(
     control_seed: int | None = None,
     requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE,
 ) -> ScreenResult:
-    """Narrow the universe to a shortlist, with a random control drawn alongside."""
+    """Narrow the universe to a shortlist, with a random control drawn alongside.
+
+    Today's Alpha Vantage price answers are kept on disk for the run (and for
+    the day), so a rerun -- or another date's screen -- pays only for the gaps.
+    """
+    with daily_disk_cache(config.get("data_cache_dir") or DEFAULT_CONFIG["data_cache_dir"]):
+        return _run_screen(mandate_name, as_of, config, picks, controls, fundamental_budget,
+                           universe_limit, control_seed, requests_per_minute)
+
+
+def _run_screen(
+    mandate_name, as_of, config, picks, controls, fundamental_budget,
+    universe_limit, control_seed, requests_per_minute,
+) -> ScreenResult:
     mandate = get_mandate(mandate_name)
     as_of_ts = pd.Timestamp(as_of)
     start = (as_of_ts - pd.Timedelta(days=int(365 * 1.6))).strftime("%Y-%m-%d")
@@ -256,14 +271,13 @@ def run_screen(
     tiers.append(TierStat("universe", examined=len(universe), kept=len(universe)))
     delisted = {c.symbol for c in universe if c.delisted_since}
 
-    # One limiter for every Alpha Vantage call the screen makes: the price
-    # fallback for delisted names and the fundamentals tier share one budget.
+    # One limiter for every Alpha Vantage call the screen makes: the price tier
+    # and the fundamentals tier share one budget.
     limiter = RateLimiter(requests_per_minute)
-    price_data = prices.download(
-        [c.symbol for c in universe], start, end, fallback=delisted, limiter=limiter,
-    )
+    price_data = prices.download_av([c.symbol for c in universe], start, end, limiter=limiter)
     frames = price_data.frames
-    bench = prices.download([BENCHMARK], start, end).frames.get(BENCHMARK, pd.DataFrame())
+    bench = prices.download_av([BENCHMARK], start, end, limiter=limiter).frames.get(
+        BENCHMARK, pd.DataFrame())
 
     # --- tier 1: price ---
     reasons: Counter = Counter()
