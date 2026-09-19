@@ -447,6 +447,18 @@ for directional ratings. A Sell is right when the name fell against its
 benchmark. **Hold claims no direction, so it gets no hit rate** — only its mean
 alpha. Decisions with no readable rating are reported as unscored.
 
+**Is conviction earning its keep?** Below the per-rating lines, a *Conviction*
+section asks whether stronger ratings produced bigger moves in their direction
+-- the only reason to have five ratings rather than three:
+
+- **Tilted alpha**: the ratings read as position sizes (full for Buy and Sell,
+  half for Overweight and Underweight, none for Hold), averaged over settled cells.
+- **Rank correlation** between conviction and alpha: positive means stronger
+  calls did better in the direction they claimed.
+- **Order**: whether Buy beat Overweight beat Hold, and so on to Sell. An
+  inversion is named ("Overweight beat Buy"). Ratings with fewer than 5 settled
+  cells are listed as too thin and left out of the ordering.
+
 It evaluates **decision quality**, not a portfolio: there are no fills, sizes or
 cash ledger, and every cell is independent.
 

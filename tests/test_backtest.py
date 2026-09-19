@@ -288,3 +288,74 @@ def test_resuming_under_a_different_mandate_reruns_the_cells(tmp_path):
     run_backtest(["KO"], ["2026-01-05"], cfg, run_id="r1", mandate="equity_value")
     other = run_backtest(["KO"], ["2026-01-05"], cfg, run_id="r1", mandate="equity_momentum")
     assert (other.cells_run, other.skipped) == (1, 0)
+
+
+# --- conviction: do stronger ratings mean bigger moves in their direction? ---------------
+
+
+def _cells(tmp_path, spec):
+    """spec: [(rating, [alpha, ...]), ...] -> a log of settled cells, one ticker each."""
+    rows, n = [], 0
+    for rating, alphas in spec:
+        for alpha in alphas:
+            rows.append((f"T{n:03d}", "2026-01-05", f"Rating: {rating}\n\nx", (alpha, alpha)))
+            n += 1
+    return _log_with(tmp_path, rows)
+
+
+@pytest.mark.unit
+def test_ratings_as_position_tilts(tmp_path):
+    """Buy +1 x +10%, Sell -1 x -10%, Overweight +1/2 x +4% -> mean (0.10+0.10+0.02)/3."""
+    c = summarize(_cells(tmp_path, [("Buy", [0.10]), ("Sell", [-0.10]), ("Overweight", [0.04])])).conviction
+    assert c.tilted_alpha == pytest.approx(0.22 / 3, abs=1e-6)
+    assert c.cells == 3
+
+
+@pytest.mark.unit
+def test_stronger_calls_doing_better_ranks_positive_and_in_order(tmp_path):
+    c = summarize(_cells(tmp_path, [
+        ("Buy", [0.08, 0.09, 0.07, 0.10, 0.06]),
+        ("Overweight", [0.02, 0.03, 0.01, 0.02, 0.03]),
+        ("Sell", [-0.05, -0.06, -0.04, -0.07, -0.05]),
+    ])).conviction
+    assert c.rank_correlation > 0.8
+    assert c.inversions == []
+    text = "\n".join(c.render())
+    assert "In order: Buy > Overweight > Sell by mean alpha." in text
+
+
+@pytest.mark.unit
+def test_a_weaker_rating_beating_a_stronger_one_is_named(tmp_path):
+    c = summarize(_cells(tmp_path, [
+        ("Buy", [0.01, 0.02, 0.01, 0.02, 0.02]),
+        ("Overweight", [0.08, 0.07, 0.09, 0.08, 0.07]),
+    ])).conviction
+    assert c.inversions == [("Overweight", "Buy")]
+    assert "Out of order: Overweight beat Buy" in "\n".join(c.render())
+
+
+@pytest.mark.unit
+def test_a_thin_rating_is_named_and_not_ranked(tmp_path):
+    """Two bad Buys are two stocks' luck, not evidence that Buy underperforms."""
+    c = summarize(_cells(tmp_path, [
+        ("Buy", [-0.05, -0.04]),
+        ("Overweight", [0.03, 0.02, 0.04, 0.03, 0.02]),
+    ])).conviction
+    assert c.inversions == []
+    assert c.thin == [("Buy", 2)]
+    text = "\n".join(c.render())
+    assert "Too few settled cells to rank: Buy (n=2)" in text
+    assert "In order" not in text, "one rankable rating is not an ordering"
+
+
+@pytest.mark.unit
+def test_rank_correlation_needs_varied_ratings(tmp_path):
+    c = summarize(_cells(tmp_path, [("Buy", [0.01, 0.02, 0.03, 0.04, 0.05])])).conviction
+    assert c.rank_correlation is None
+    assert "n/a" in "\n".join(c.render())
+
+
+@pytest.mark.unit
+def test_nothing_settled_prints_no_conviction_section(tmp_path):
+    log = _log_with(tmp_path, [("NVDA", "2026-01-05", "Rating: Buy\n\nx", None)])
+    assert "Conviction" not in summarize(log).render()

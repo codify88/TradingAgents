@@ -88,6 +88,85 @@ class BacktestResult:
 _DIRECTION = {"Buy": 1, "Overweight": 1, "Hold": 0, "Underweight": -1, "Sell": -1}
 
 
+# How hard each rating leans, as a position tilt: full size for Buy and Sell,
+# half for Overweight and Underweight. The direction map above can only say a
+# call was right; this lets the summary ask whether *stronger* calls were more
+# right -- the only reason to have five ratings rather than three.
+_CONVICTION = {"Buy": 1.0, "Overweight": 0.5, "Hold": 0.0, "Underweight": -0.5, "Sell": -1.0}
+_ORDER = ("Buy", "Overweight", "Hold", "Underweight", "Sell")
+# Below this many settled cells a rating's mean alpha is one or two stocks'
+# luck, so it is named as too thin rather than ranked.
+MIN_CELLS_PER_RATING = 5
+
+
+@dataclass
+class ConvictionCheck:
+    """Whether the ratings' strength, not just their direction, tracked outcomes."""
+
+    tilted_alpha: float | None       # mean of conviction x alpha: ratings as position tilts
+    rank_correlation: float | None   # Spearman, conviction vs alpha, across settled cells
+    cells: int                       # settled cells the two figures above are drawn from
+    inversions: list[tuple[str, str]] = field(default_factory=list)  # (weaker, stronger) out of order
+    thin: list[tuple[str, int]] = field(default_factory=list)        # ratings too thin to rank
+    ranked: list[str] = field(default_factory=list)                  # ratings with enough cells, strongest first
+
+    def render(self) -> list[str]:
+        if not self.cells:
+            return []
+        lines = ["", "Conviction (does a stronger rating mean a bigger move in its direction?):"]
+        lines.append(
+            f"- Ratings as position tilts (full size for the strongest calls, half for the "
+            f"moderate ones): mean tilted alpha {self.tilted_alpha:+.2%} per cell."
+        )
+        if self.rank_correlation is None:
+            lines.append("- Rank correlation, conviction vs alpha: n/a (needs varied ratings and 5+ cells).")
+        else:
+            lines.append(
+                f"- Rank correlation, conviction vs alpha: {self.rank_correlation:+.2f} over "
+                f"{self.cells} cells (positive: stronger calls did better in their direction)."
+            )
+        if self.inversions:
+            lines.append("- Out of order: " + "; ".join(
+                f"{weaker} beat {stronger}" for weaker, stronger in self.inversions))
+        elif len(self.ranked) >= 2:
+            lines.append(f"- In order: {' > '.join(self.ranked)} by mean alpha.")
+        if self.thin:
+            lines.append(
+                "- Too few settled cells to rank: "
+                + ", ".join(f"{r} (n={n})" for r, n in self.thin)
+                + f" -- {MIN_CELLS_PER_RATING} each needed."
+            )
+        return lines
+
+
+def conviction_check(resolved: list[tuple[dict, float]], by_rating: dict) -> ConvictionCheck:
+    """Score the ratings' strength against what happened, across settled cells."""
+    pairs = [(_CONVICTION[e["rating"]], a) for e, a in resolved if e["rating"] in _CONVICTION]
+    if not pairs:
+        return ConvictionCheck(None, None, 0)
+    tilted = sum(c * a for c, a in pairs) / len(pairs)
+
+    rank = None
+    if len(pairs) >= MIN_CELLS_PER_RATING and len({c for c, _ in pairs}) > 1:
+        import pandas as pd
+
+        # Spearman is Pearson on ranks (ties averaged); computed directly because
+        # pandas' method="spearman" needs scipy, which the project does not ship.
+        conv = pd.Series([c for c, _ in pairs]).rank()
+        alph = pd.Series([a for _, a in pairs]).rank()
+        value = conv.corr(alph)
+        rank = None if pd.isna(value) else float(value)
+
+    thin = [(r, by_rating[r].count) for r in _ORDER
+            if r in by_rating and by_rating[r].count < MIN_CELLS_PER_RATING]
+    ranked = [r for r in _ORDER if r in by_rating and by_rating[r].count >= MIN_CELLS_PER_RATING]
+    # A stronger rating should have produced a higher mean alpha than the one
+    # below it: Buy above Overweight above Hold, and so on down to Sell.
+    inversions = [(weaker, stronger) for stronger, weaker in zip(ranked, ranked[1:], strict=False)
+                  if by_rating[weaker].mean_alpha > by_rating[stronger].mean_alpha]
+    return ConvictionCheck(tilted, rank, len(pairs), inversions, thin, ranked)
+
+
 @dataclass
 class RatingScore:
     count: int
@@ -102,6 +181,7 @@ class BacktestSummary:
     by_rating: dict[str, RatingScore]
     unscored: int = 0
     holding: str = ""
+    conviction: ConvictionCheck | None = None
 
     def render(self) -> str:
         lines = [f"Resolved cells: {self.resolved} · pending: {self.pending}"
@@ -113,6 +193,8 @@ class BacktestSummary:
                 f"- {rating}: n={score.count}, {called}, "
                 f"mean alpha {score.mean_alpha:+.2%} vs the benchmark"
             )
+        if self.conviction is not None:
+            lines.extend(self.conviction.render())
         lines.append("")
         if self.pending:
             lines.append("Pending cells are not scored above; re-run to settle them.")
@@ -209,4 +291,5 @@ def summarize(memory_log: TradingMemoryLog) -> BacktestSummary:
     return BacktestSummary(resolved=len(resolved),
                            pending=len(entries) - len(resolved) - unscored,
                            by_rating=by_rating, unscored=unscored,
-                           holding=", ".join(sorted(windows)) or "the configured window")
+                           holding=", ".join(sorted(windows)) or "the configured window",
+                           conviction=conviction_check(resolved, by_rating))
