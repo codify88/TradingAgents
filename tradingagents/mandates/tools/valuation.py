@@ -230,27 +230,35 @@ def reverse_dcf(
 
 
 def growth_record(f: Financials, years: int = 10) -> tuple[float, str]:
-    """The business's own growth record, and which series it came from.
+    """The business's own profit-growth record, and which series it came from.
 
-    The highest of revenue, operating-income and free-cash-flow CAGR: a
-    deliberately generous reading, so that when the price still demands more
-    than this, the margin-of-safety screen is tripping on something real.
-    Operating income matters most for companies that shrink revenue on purpose
-    (KO refranchised its bottlers: revenue grew 0.8% a year over the decade to
-    FY2025 while operating income grew 4.7%).
+    The highest operating-income or free-cash-flow CAGR, over the full span (up
+    to ``years``) or the last five years: a deliberately generous reading, so
+    that when the price still demands more than this, the margin-of-safety
+    screen is tripping on something real.
+
+    Profit only, never revenue. The reverse DCF prices free-cash-flow growth,
+    and revenue can outgrow profit for a decade while margins give way: TSLA's
+    revenue compounded 37% a year over the ten years to FY2025 while its
+    five-year operating income grew 17% and free cash flow 18%. Measured
+    against revenue, a price implying 32-36% FCF growth read as CLEAR.
+    Operating income keeps companies that shrink revenue on purpose fairly
+    measured (KO refranchised its bottlers: revenue grew 0.8% a year over the
+    decade to FY2025 while operating income grew 4.7%).
     """
     m = annual_metrics(f)
     span = min(years, len(m.dropna(subset=["revenue"])) - 1)
     if span < 3:
         return float("nan"), "insufficient history"
+    profit = ((f.col("operatingIncome"), "operating-income"), (m["fcf"], "free-cash-flow"))
     candidates = [
-        (cagr(m["revenue"], span), f"{span}y revenue CAGR"),
-        (cagr(f.col("operatingIncome"), span), f"{span}y operating-income CAGR"),
-        (cagr(m["fcf"], span), f"{span}y free-cash-flow CAGR"),
+        (cagr(series, n), f"{n}y {name} CAGR")
+        for n in dict.fromkeys((span, min(span, 5)))
+        for series, name in profit
     ]
     candidates = [c for c in candidates if not math.isnan(c[0])]
     if not candidates:
-        return float("nan"), "no positive-endpoint growth series"
+        return float("nan"), "no positive-endpoint profit series"
     return max(candidates)
 
 

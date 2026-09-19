@@ -352,6 +352,41 @@ class TestValuationFromStatements:
         assert "operating-income" in label
         assert rate == pytest.approx(0.05, abs=1e-6)
 
+    @staticmethod
+    def _hypergrowth():
+        """TSLA-shaped: revenue compounds 37%/yr from a small base; the business
+        lost money early and its profit has compounded far more slowly since."""
+        years = {}
+        for i, y in enumerate(range(2014, 2026)):
+            profitable = y >= 2019
+            years[f"{y}-12-31"] = {
+                **STEADY, "totalRevenue": 100 * 1.37 ** i,
+                "operatingIncome": 250 * 1.17 ** (y - 2019) if profitable else -50,
+                "operatingCashflow": 240 * 1.18 ** (y - 2019) if profitable else -50,
+                "capitalExpenditures": 40 * 1.18 ** (y - 2019),
+            }
+        return years
+
+    def test_growth_record_ignores_revenue_that_outran_profit(self, av):
+        av["payloads"] = company(self._hypergrowth())
+        rate, label = val.growth_record(fin.load_financials("TEST", "2026-09-17"))
+        assert "revenue" not in label
+        assert label.startswith("5y ")  # the 10y window starts in a loss year
+        assert rate == pytest.approx(0.18, abs=1e-6)
+
+    def test_hypergrowth_price_trips_the_screen(self, av):
+        """The TSLA case: 32-36% implied FCF growth against an 18% profit record."""
+        av["payloads"] = company(self._hypergrowth())
+        rate, label = val.growth_record(fin.load_financials("TEST", "2026-09-17"))
+        s = val.margin_of_safety_screen({"normalized": 0.359, "trailing": 0.320}, rate, label)
+        assert s.status == "TRIPPED"
+
+    def test_growth_record_undefined_without_profit(self, av):
+        av["payloads"] = company(steady_years(operatingIncome=-10, operatingCashflow=-10))
+        rate, label = val.growth_record(fin.load_financials("TEST", "2026-09-17"))
+        assert math.isnan(rate)
+        assert "profit" in label
+
 
 # --- LLM tools ------------------------------------------------------------------
 

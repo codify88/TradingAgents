@@ -298,7 +298,10 @@ def _reverse_dcf_report(ticker: str, curr_date: str) -> str:
         "### FCF growth per year the price requires\n" + implied_grid
         + "\nRead across: the implied rate moves several points per point of discount rate, "
           "so treat the grid, not one cell, as the answer.",
-        "### What the business has delivered\n" + _table(["Series", "5y CAGR", "10y CAGR"], record_rows),
+        "### What the business has delivered\n" + _table(["Series", "5y CAGR", "10y CAGR"], record_rows)
+        + "\nThe screen below measures the implied rate against the best profit series "
+          "(operating income or free cash flow), not revenue: the price is paying for cash "
+          "flow, and revenue that outgrew profit did not deliver it.",
         "### Value per share (margin of safety vs current price)\n"
         f"On normalized FCF ({_money(snap.normalized_fcf)}):\n" + value_grid(snap.normalized_fcf)
         + f"\n\nOn trailing FCF ({_money(snap.ttm_fcf)}):\n" + value_grid(snap.ttm_fcf)
