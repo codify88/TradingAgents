@@ -83,6 +83,20 @@ class TestDownloadAv:
         assert data.unavailable == {"BAD"}
         assert "DEAD" not in data.unavailable  # an answer, not an outage
 
+    def test_a_timeout_is_retried_before_the_name_is_unavailable(self, monkeypatch):
+        monkeypatch.setattr(prices, "TRANSIENT_RETRY_SECONDS", 0.0)
+        answers = iter([TimeoutError("read timed out"), CSV])
+
+        def answer(*a):
+            x = next(answers)
+            if isinstance(x, Exception):
+                raise x
+            return x
+
+        with patch.object(fin, "_make_api_request", side_effect=answer):
+            data = prices.download_av(["CYRX"], "2024-06-01", "2024-06-12")
+        assert "CYRX" in data.frames and not data.unavailable
+
     def test_the_same_answer_twice_is_the_same_frame(self):
         """The point of the switch: two runs of one screen must agree."""
         with patch.object(fin, "_make_api_request", return_value=CSV):

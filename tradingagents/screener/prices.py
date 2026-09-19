@@ -41,6 +41,9 @@ def _quiet():
 # losing everything; chunking bounds the blast radius and lets partial results
 # through.
 BATCH_SIZE = 200
+# Backoff before re-asking Alpha Vantage after a transient failure (a timeout,
+# a dropped connection) -- rate limits back off separately, in with_retry.
+TRANSIENT_RETRY_SECONDS = 5.0
 
 
 @dataclass
@@ -196,10 +199,20 @@ def download_av(
     for symbol in symbols:
         if limiter is not None and not daily_is_cached(symbol):
             limiter.acquire(1)
-        try:
-            frame = with_retry(lambda s=symbol: alpha_vantage_daily_strict(s), attempts=attempts)
-        except Exception as exc:
-            logger.warning("price history unavailable for %s: %s", symbol, exc)
+        frame, failure = None, None
+        for attempt in range(attempts):
+            try:
+                frame = with_retry(lambda s=symbol: alpha_vantage_daily_strict(s), attempts=attempts)
+                break
+            except Exception as exc:
+                # A read timeout is as transient as a rate limit (CYRX timed out
+                # once mid-screen): unretried, it made the name "unavailable"
+                # for the run and the funnel differed from the next run's.
+                failure = exc
+                if attempt < attempts - 1:
+                    time.sleep(TRANSIENT_RETRY_SECONDS * (attempt + 1))
+        if frame is None:
+            logger.warning("price history unavailable for %s: %s", symbol, failure)
             data.unavailable.add(symbol)
             continue
         if frame.empty:
