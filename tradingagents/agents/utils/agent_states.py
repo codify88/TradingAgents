@@ -4,6 +4,17 @@ from langgraph.graph import MessagesState
 from typing_extensions import TypedDict
 
 
+def merge_mandate_reports(
+    left: dict[str, str] | None, right: dict[str, str] | None
+) -> dict[str, str]:
+    """Reducer for ``mandate_reports``: each mandate analyst adds its own key.
+
+    One dict-valued channel serves every analyst any mandate adds, so a new
+    analyst never needs a new field here.
+    """
+    return {**(left or {}), **(right or {})}
+
+
 # Researcher team state
 class InvestDebateState(TypedDict):
     bull_history: Annotated[
@@ -48,6 +59,8 @@ class AgentState(MessagesState):
     company_of_interest: Annotated[str, "Company that we are interested in trading"]
     asset_type: Annotated[str, "Asset type under analysis such as stock or crypto"]
     instrument_context: Annotated[str, "Deterministic ticker identity resolved at run start"]
+    mandate: Annotated[str, "Investment mandate wire name, e.g. equity_value (empty = none)"]
+    mandate_context: Annotated[str, "Rendered mandate prompt block resolved at run start"]
     trade_date: Annotated[str, "What date we are trading at"]
 
     sender: Annotated[str, "Agent that sent this message"]
@@ -59,6 +72,7 @@ class AgentState(MessagesState):
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    mandate_reports: Annotated[dict[str, str], merge_mandate_reports]
 
     # researcher team discussion step
     investment_debate_state: Annotated[
@@ -74,3 +88,4 @@ class AgentState(MessagesState):
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
+    portfolio_context: Annotated[str, "Caller-supplied holdings and cash, rendered at run start; empty when not provided"]

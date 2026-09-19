@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.stockstats_utils import load_ohlcv
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
@@ -32,7 +33,14 @@ def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     look-ahead rows, but we re-apply the cutoff defensively — this is a
     verification path, so it must not trust its input to be pre-filtered.
     """
-    data = load_ohlcv(symbol, curr_date)
+    # As reported: this snapshot is quoted by the agents as exact prices, so a
+    # gap-filled cell would put the previous session's number under this date.
+    try:
+        data = load_ohlcv(symbol, curr_date, fill_gaps=False)
+    except NoMarketDataError:
+        data = _configured_fallback_rows(symbol)
+        if data is None:
+            raise
     if data is None or data.empty:
         raise ValueError(f"No OHLCV data available for {symbol}.")
 
@@ -43,6 +51,36 @@ def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     if df.empty:
         raise ValueError(f"No OHLCV rows on or before {curr_date} for {symbol}.")
     return df
+
+
+def _configured_fallback_rows(symbol: str) -> pd.DataFrame | None:
+    """As-reported OHLCV from Alpha Vantage, when the run's price vendors include it.
+
+    Yahoo drops a ticker's history once it delists, so a historical run on a
+    company that no longer trades would otherwise find no rows here -- and this
+    tool raises rather than returning a notice, which ends the whole run. The
+    fallback applies only when Alpha Vantage is in the configured
+    ``core_stock_apis`` chain (historical screen runs add it), so a run on
+    Yahoo alone behaves exactly as before.
+    """
+    from .config import get_config
+
+    chain = str(get_config().get("data_vendors", {}).get("core_stock_apis", ""))
+    if "alpha_vantage" not in [v.strip() for v in chain.split(",")]:
+        return None
+    from tradingagents.mandates.tools.financials import alpha_vantage_daily
+
+    frame = alpha_vantage_daily(symbol)
+    if frame.empty or "Raw Close" not in frame:
+        return None
+    return pd.DataFrame({
+        "Date": frame.index,
+        "Open": frame["Raw Open"].to_numpy(),
+        "High": frame["Raw High"].to_numpy(),
+        "Low": frame["Raw Low"].to_numpy(),
+        "Close": frame["Raw Close"].to_numpy(),
+        "Volume": frame["Volume"].to_numpy(),
+    })
 
 
 def _fmt(value) -> str:

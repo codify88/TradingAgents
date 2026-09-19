@@ -1,6 +1,7 @@
 """Append-only markdown decision log for TradingAgents."""
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from tradingagents.agents.utils.rating import parse_rating
@@ -12,8 +13,18 @@ class TradingMemoryLog:
     # HTML comment: cannot appear in LLM prose output, safe as a hard delimiter
     _SEPARATOR = "\n\n<!-- ENTRY_END -->\n\n"
     # Precompiled patterns — avoids re-compilation on every load_entries() call
-    _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
+    _DECISION_RE = re.compile(
+        r"DECISION:\n(.*?)(?=\n\nREVIEW \d+d @ |\nREFLECTION:|\Z)", re.DOTALL
+    )
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
+    # Interim checkpoints on a still-pending entry. A long-horizon decision is
+    # graded several times before it settles, so one entry holds several
+    # outcomes: N REVIEW blocks, then at most one REFLECTION.
+    _REVIEW_RE = re.compile(
+        r"^REVIEW (\d+)d @ (\d{4}-\d{2}-\d{2}): raw (\S+) \| alpha (\S+)\n"
+        r"(.*?)(?=\n\nREVIEW \d+d @ |\n\nREFLECTION:|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
 
     def __init__(self, config: dict = None):
         cfg = config or {}
@@ -32,21 +43,86 @@ class TradingMemoryLog:
         ticker: str,
         trade_date: str,
         final_trade_decision: str,
-    ) -> None:
-        """Append pending entry at end of propagate(). No LLM call."""
+        mandate: str = "",
+        supersede: bool = False,
+    ) -> bool:
+        """Append pending entry at end of propagate(). No LLM call.
+
+        ``mandate`` is recorded on the tag so the deferred outcome resolution
+        grades this decision on the horizon it was actually made for, even if
+        the next run of the same ticker uses a different mandate.
+
+        ``supersede`` retires an existing entry for the same ticker, date and
+        mandate and records this one in its place. Without it a re-run is
+        silently dropped, which is right when the re-run is incidental and
+        wrong when it happened *because the analysis improved*: the log would
+        keep teaching, and eventually grade, the decision that has been
+        superseded. The old entry is marked rather than deleted, so the log
+        remains an honest record of what was decided and when.
+
+        Returns True when an entry was written.
+        """
         if not self._log_path:
-            return
-        # Idempotency guard: fast raw-text scan instead of full parse
+            return False
+        # Idempotency guard: fast raw-text scan instead of full parse. Any entry
+        # for this ticker and date blocks another, pending or settled: a re-run
+        # after the outcome landed would otherwise count the same decision twice
+        # in past context and in every aggregate over the log.
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
+            prefix = f"[{trade_date} | {ticker} |"
             for line in raw.splitlines():
-                if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
-                    return
+                # Upstream blocks on any entry for this ticker and date, settled
+                # or pending, so a re-run after the outcome landed cannot count
+                # the same decision twice (#645). Scoped to the mandate here:
+                # the same ticker and date under a *different* mandate is a
+                # genuinely different decision -- different horizon, different
+                # framing -- and gets its own entry.
+                if self._tag_mandate(line.strip(), prefix) == mandate:
+                    if not supersede:
+                        return False
+                    self._mark_superseded(trade_date, ticker, mandate)
+                    break
         rating = parse_rating(final_trade_decision)
-        tag = f"[{trade_date} | {ticker} | {rating} | pending]"
+        tag = f"[{trade_date} | {ticker} | {rating} | pending"
+        if mandate:
+            tag += f" | mandate:{mandate}"
+        tag += "]"
         entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
+        return True
+
+    def _mark_superseded(self, trade_date: str, ticker: str, mandate: str) -> None:
+        """Tag every live entry for this ticker/date/mandate as superseded.
+
+        Atomic temp-file write, like the outcome updates: a crash mid-write must
+        not leave the log holding two live entries for one decision.
+        """
+        text = self._log_path.read_text(encoding="utf-8")
+        prefix = f"[{trade_date} | {ticker} |"
+        stamp = datetime.now().strftime("%Y-%m-%d")
+
+        blocks = []
+        for block in text.split(self._SEPARATOR):
+            stripped = block.strip()
+            if not stripped:
+                blocks.append(block)
+                continue
+            lines = stripped.splitlines()
+            tag_line = lines[0].strip()
+            if (
+                self._tag_mandate(tag_line, prefix) == mandate
+                and "superseded:" not in tag_line
+            ):
+                new_tag = f"{tag_line[:-1]} | superseded:{stamp}]"
+                blocks.append("\n".join([new_tag, *lines[1:]]))
+            else:
+                blocks.append(block)
+
+        tmp_path = self._log_path.with_suffix(".tmp")
+        tmp_path.write_text(self._SEPARATOR.join(blocks), encoding="utf-8")
+        tmp_path.replace(self._log_path)
 
     # --- Read path (Phase A) ---
 
@@ -64,11 +140,20 @@ class TradingMemoryLog:
         return entries
 
     def get_pending_entries(self) -> list[dict]:
-        """Return entries with outcome:pending (for Phase B)."""
-        return [e for e in self.load_entries() if e.get("pending")]
+        """Return unsettled entries still awaiting an outcome (for Phase B).
+
+        Superseded entries are excluded: spending a price lookup and a
+        reflection call to grade a decision that has been replaced would put
+        the retired analysis back into the lessons it was retired from.
+        """
+        return [
+            e for e in self.load_entries()
+            if e.get("pending") and not e.get("superseded")
+        ]
 
     def get_past_context(
-        self, ticker: str, n_same: int = 5, n_cross: int = 3, as_of: str | None = None
+        self, ticker: str, n_same: int = 5, n_cross: int = 3, as_of: str | None = None,
+        mandate: str | None = None,
     ) -> str:
         """Return formatted past context string for agent prompt injection.
 
@@ -78,10 +163,38 @@ class TradingMemoryLog:
         ``as_of``. This keeps a historical/backtest run from learning from
         outcomes that had not happened yet (#1251). ``as_of=None`` disables the
         filter, so live runs and pre-migration entries are unaffected.
+
+        When ``mandate`` is given (``""`` for an unmandated run), only lessons
+        written under that mandate are shown. A value lesson ("the drawdown was
+        an opportunity") taught to a momentum run on the same ticker is the
+        wrong lesson for its horizon. ``None`` disables the filter.
+
+        A *pending* entry is included once it carries at least one interim
+        review that has come due. Without this a long-horizon mandate teaches
+        nothing until its thesis settles -- two years, for equity_value -- which
+        is precisely what review horizons exist to prevent. Only reviews whose
+        own resolution date has passed are shown, so the point-in-time guarantee
+        holds for checkpoints exactly as it does for final outcomes.
         """
-        entries = [e for e in self.load_entries() if not e.get("pending")]
-        if as_of is not None:
-            entries = [e for e in entries if e.get("resolved") and e["resolved"] <= as_of]
+        entries = []
+        for e in self.load_entries():
+            if e.get("superseded"):
+                continue  # retired by a later run; kept on disk, never taught
+            if mandate is not None and (e.get("mandate") or "") != mandate:
+                continue  # learned under another mandate's horizon and rules
+            if not e.get("pending"):
+                if as_of is not None and not (
+                    e.get("resolved") and e["resolved"] <= as_of
+                ):
+                    continue
+                entries.append(e)
+                continue
+            visible = [
+                r for r in e.get("reviews", ())
+                if as_of is None or r["resolved"] <= as_of
+            ]
+            if visible:
+                entries.append({**e, "reviews": visible})
         if not entries:
             return ""
 
@@ -106,6 +219,51 @@ class TradingMemoryLog:
             parts.extend(self._format_reflection_only(e) for e in cross)
         return "\n\n".join(parts)
 
+    @staticmethod
+    def _tag_mandate(tag_line: str, prefix: str):
+        """The mandate on any entry tag matching ``prefix``, else ``None``.
+
+        Unlike :meth:`_match_pending_tag` this accepts settled entries too, for
+        the write-path idempotency guard. ``None`` means "not an entry for this
+        ticker and date", which no mandate string can collide with.
+        """
+        if not (tag_line.startswith(prefix) and tag_line.endswith("]")):
+            return None
+        fields = [f.strip() for f in tag_line[1:-1].split("|")]
+        if len(fields) < 4:
+            return None
+        return next(
+            (f.split(":", 1)[1].strip() for f in fields[4:] if f.startswith("mandate:")),
+            "",
+        )
+
+    @staticmethod
+    def _match_pending_tag(tag_line: str, prefix: str) -> tuple[str, str] | None:
+        """Return ``(rating, mandate)`` for a matching pending tag, else None.
+
+        ``pending`` sits at field index 3 but is no longer necessarily the last
+        field -- a ``mandate:`` marker may follow it -- so this matches on the
+        parsed fields rather than on the line's suffix. The mandate is returned
+        so it survives onto the resolved tag.
+        """
+        if not (tag_line.startswith(prefix) and tag_line.endswith("]")):
+            return None
+        fields = [f.strip() for f in tag_line[1:-1].split("|")]
+        if len(fields) < 4 or fields[3] != "pending":
+            return None
+        # A superseded entry is still literally "pending", but settling it would
+        # rewrite its tag through _resolved_tag, which does not carry the
+        # superseded marker -- the retired decision would come back as an
+        # ordinary resolved lesson. Both update paths share this matcher, so
+        # excluding it here closes that for all of them.
+        if any(f.startswith("superseded:") for f in fields[4:]):
+            return None
+        mandate = next(
+            (f.split(":", 1)[1].strip() for f in fields[4:] if f.startswith("mandate:")),
+            "",
+        )
+        return fields[2], mandate
+
     # --- Update path (Phase B) ---
 
     def update_with_outcome(
@@ -117,10 +275,12 @@ class TradingMemoryLog:
         holding_days: int,
         reflection: str,
         resolution_date: str | None = None,
+        mandate: str = "",
     ) -> None:
         """Replace pending tag and append REFLECTION section using atomic write.
 
-        Finds the first pending entry matching (trade_date, ticker), updates
+        Finds the first pending entry matching (trade_date, ticker, mandate),
+        updates
         its tag with return figures (and the ``resolution_date`` the outcome
         became known), and appends a REFLECTION section.  Uses a temp-file +
         os.replace() so a crash mid-write never corrupts the log.
@@ -146,16 +306,12 @@ class TradingMemoryLog:
             lines = stripped.splitlines()
             tag_line = lines[0].strip()
 
-            if (
-                not updated
-                and tag_line.startswith(pending_prefix)
-                and tag_line.endswith("| pending]")
-            ):
-                # Parse rating from the existing pending tag
-                fields = [f.strip() for f in tag_line[1:-1].split("|")]
-                rating = fields[2]
+            match = None if updated else self._match_pending_tag(tag_line, pending_prefix)
+            if match is not None and match[1] == mandate:
+                rating, _ = match
                 new_tag = self._resolved_tag(
-                    trade_date, ticker, rating, raw_pct, alpha_pct, holding_days, resolution_date
+                    trade_date, ticker, rating, raw_pct, alpha_pct, holding_days,
+                    resolution_date, mandate,
                 )
                 rest = "\n".join(lines[1:])
                 new_blocks.append(
@@ -174,6 +330,69 @@ class TradingMemoryLog:
         tmp_path.write_text(new_text, encoding="utf-8")
         tmp_path.replace(self._log_path)
 
+    def batch_append_reviews(self, reviews: list[dict]) -> None:
+        """Record interim outcomes on entries that are still pending.
+
+        A review is a checkpoint, not a verdict: the entry keeps its ``pending``
+        tag and will be settled later at its mandate's primary horizon. This is
+        what stops a two-year value thesis from producing no learning signal for
+        two years -- each review is injectable into later runs the moment its
+        own resolution date has passed.
+
+        Each element needs: ticker, trade_date, mandate, horizon_days,
+        raw_return, alpha_return, resolution_date, note.
+        """
+        if not self._log_path or not self._log_path.exists() or not reviews:
+            return
+
+        # Several horizons can come due for one entry in a single run (a long
+        # gap between runs), so group them and append in horizon order.
+        grouped: dict[tuple[str, str, str], list[dict]] = {}
+        for r in reviews:
+            key = (r["trade_date"], r["ticker"], r.get("mandate", ""))
+            grouped.setdefault(key, []).append(r)
+        for group in grouped.values():
+            group.sort(key=lambda r: r["horizon_days"])
+
+        text = self._log_path.read_text(encoding="utf-8")
+        blocks = text.split(self._SEPARATOR)
+
+        new_blocks = []
+        for block in blocks:
+            stripped = block.strip()
+            if not stripped:
+                new_blocks.append(block)
+                continue
+
+            tag_line = stripped.splitlines()[0].strip()
+            appended = False
+            for key, group in list(grouped.items()):
+                trade_date, ticker, mandate = key
+                match = self._match_pending_tag(tag_line, f"[{trade_date} | {ticker} |")
+                if match is None or match[1] != mandate:
+                    continue
+                body = stripped
+                for r in group:
+                    # Idempotency: never write the same horizon twice, even if a
+                    # caller re-offers one that is already on the entry.
+                    if f"REVIEW {r['horizon_days']}d @ " in body:
+                        continue
+                    body += "\n\n" + self._render_review(r)
+                new_blocks.append(body)
+                del grouped[key]
+                appended = True
+                break
+
+            if not appended:
+                new_blocks.append(block)
+
+        # No rotation pass: a review resolves nothing, so the resolved-entry
+        # count that rotation caps is unchanged.
+        new_text = self._SEPARATOR.join(new_blocks)
+        tmp_path = self._log_path.with_suffix(".tmp")
+        tmp_path.write_text(new_text, encoding="utf-8")
+        tmp_path.replace(self._log_path)
+
     def batch_update_with_outcomes(self, updates: list[dict]) -> None:
         """Apply multiple outcome updates in a single read + atomic write.
 
@@ -186,8 +405,11 @@ class TradingMemoryLog:
         text = self._log_path.read_text(encoding="utf-8")
         blocks = text.split(self._SEPARATOR)
 
-        # Build lookup keyed by (trade_date, ticker) for O(1) dispatch
-        update_map = {(u["trade_date"], u["ticker"]): u for u in updates}
+        # Keyed by (trade_date, ticker, mandate): the same ticker and date can
+        # carry one pending entry per mandate, each with its own horizon.
+        update_map = {
+            (u["trade_date"], u["ticker"], u.get("mandate", "")): u for u in updates
+        }
 
         new_blocks = []
         for block in blocks:
@@ -200,22 +422,22 @@ class TradingMemoryLog:
             tag_line = lines[0].strip()
 
             matched = False
-            for (trade_date, ticker), upd in list(update_map.items()):
+            for (trade_date, ticker, mandate), upd in list(update_map.items()):
                 pending_prefix = f"[{trade_date} | {ticker} |"
-                if tag_line.startswith(pending_prefix) and tag_line.endswith("| pending]"):
-                    fields = [f.strip() for f in tag_line[1:-1].split("|")]
-                    rating = fields[2]
+                match = self._match_pending_tag(tag_line, pending_prefix)
+                if match is not None and match[1] == mandate:
+                    rating, _ = match
                     raw_pct = f"{upd['raw_return']:+.1%}"
                     alpha_pct = f"{upd['alpha_return']:+.1%}"
                     new_tag = self._resolved_tag(
                         trade_date, ticker, rating, raw_pct, alpha_pct,
-                        upd["holding_days"], upd.get("resolution_date"),
+                        upd["holding_days"], upd.get("resolution_date"), mandate,
                     )
                     rest = "\n".join(lines[1:])
                     new_blocks.append(
                         f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{upd['reflection']}"
                     )
-                    del update_map[(trade_date, ticker)]
+                    del update_map[(trade_date, ticker, mandate)]
                     matched = True
                     break
 
@@ -231,8 +453,32 @@ class TradingMemoryLog:
     # --- Helpers ---
 
     @staticmethod
+    def _is_resolved_tag(tag_line: str) -> bool:
+        """Whether a tag line belongs to a settled entry.
+
+        Parses the fields rather than suffix-matching ``| pending]``: a pending
+        tag can carry trailing markers (``mandate:``), so a suffix test would
+        misread a mandated pending entry as resolved and let rotation prune
+        unfinished work.
+        """
+        if not (tag_line.startswith("[") and tag_line.endswith("]")):
+            return False
+        fields = [f.strip() for f in tag_line[1:-1].split("|")]
+        return len(fields) >= 4 and fields[3] != "pending"
+
+    @staticmethod
+    def _render_review(r: dict) -> str:
+        """One REVIEW block: the checkpoint line plus its interim note."""
+        return (
+            f"REVIEW {r['horizon_days']}d @ {r['resolution_date']}: "
+            f"raw {r['raw_return']:+.1%} | alpha {r['alpha_return']:+.1%}\n"
+            f"{r['note'].strip()}"
+        )
+
+    @staticmethod
     def _resolved_tag(
-        trade_date, ticker, rating, raw_pct, alpha_pct, holding_days, resolution_date
+        trade_date, ticker, rating, raw_pct, alpha_pct, holding_days,
+        resolution_date, mandate="",
     ) -> str:
         """Build a resolved entry tag, recording the outcome's known-by date.
 
@@ -243,6 +489,8 @@ class TradingMemoryLog:
         tag = f"[{trade_date} | {ticker} | {rating} | {raw_pct} | {alpha_pct} | {holding_days}d"
         if resolution_date:
             tag += f" | resolved:{resolution_date}"
+        if mandate:
+            tag += f" | mandate:{mandate}"
         return tag + "]"
 
     def _apply_rotation(self, blocks: list[str]) -> list[str]:
@@ -262,12 +510,7 @@ class TradingMemoryLog:
                 decisions.append((block, False))
                 continue
             tag_line = stripped.splitlines()[0].strip()
-            is_resolved = (
-                tag_line.startswith("[")
-                and tag_line.endswith("]")
-                and not tag_line.endswith("| pending]")
-            )
-            decisions.append((block, is_resolved))
+            decisions.append((block, self._is_resolved_tag(tag_line)))
 
         resolved_count = sum(1 for _, r in decisions if r)
         if resolved_count <= self._max_entries:
@@ -292,40 +535,90 @@ class TradingMemoryLog:
         fields = [f.strip() for f in tag_line[1:-1].split("|")]
         if len(fields) < 4:
             return None
-        # Optional trailing "resolved:YYYY-MM-DD" field records when the outcome
-        # became known, for point-in-time filtering (#1251).
-        resolved = None
-        for f in fields[6:]:
-            if f.startswith("resolved:"):
-                resolved = f[len("resolved:"):].strip()
+        # Fields past the rating split into positional values (alpha, holding)
+        # and "key:value" markers. "resolved:" records when the outcome became
+        # known, for point-in-time filtering (#1251); "mandate:" records which
+        # investment style the call was made under, so the deferred resolution
+        # grades it on that mandate's horizon. Both are optional, so entries
+        # written by earlier versions keep parsing unchanged.
+        tagged, positional = {}, []
+        for f in fields[4:]:
+            key = f.split(":", 1)[0] if ":" in f else None
+            if key in ("resolved", "mandate", "superseded"):
+                tagged[key] = f.split(":", 1)[1].strip()
+            else:
+                positional.append(f)
         entry = {
             "date": fields[0],
             "ticker": fields[1],
             "rating": fields[2],
             "pending": fields[3] == "pending",
             "raw": fields[3] if fields[3] != "pending" else None,
-            "alpha": fields[4] if len(fields) > 4 else None,
-            "holding": fields[5] if len(fields) > 5 else None,
-            "resolved": resolved,
+            "alpha": positional[0] if positional else None,
+            "holding": positional[1] if len(positional) > 1 else None,
+            "resolved": tagged.get("resolved"),
+            "mandate": tagged.get("mandate", ""),
+            # Date this decision was replaced by a later run of the same
+            # ticker, date and mandate. A superseded entry stays in the log as
+            # an audit trail but is never taught or graded.
+            "superseded": tagged.get("superseded"),
         }
         body = "\n".join(lines[1:]).strip()
         decision_match = self._DECISION_RE.search(body)
         reflection_match = self._REFLECTION_RE.search(body)
         entry["decision"] = decision_match.group(1).strip() if decision_match else ""
         entry["reflection"] = reflection_match.group(1).strip() if reflection_match else ""
+        # Interim outcomes, oldest horizon first. Empty for entries written
+        # before review horizons existed, and for short-horizon mandates that
+        # declare none.
+        entry["reviews"] = [
+            {
+                "days": int(m.group(1)),
+                "resolved": m.group(2),
+                "raw": m.group(3),
+                "alpha": m.group(4),
+                "note": m.group(5).strip(),
+            }
+            for m in self._REVIEW_RE.finditer(body)
+        ]
         return entry
 
     def _format_full(self, e: dict) -> str:
-        raw = e["raw"] or "n/a"
-        alpha = e["alpha"] or "n/a"
-        holding = e["holding"] or "n/a"
-        tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {raw} | {alpha} | {holding}]"
+        reviews = e.get("reviews", ())
+        if e.get("pending"):
+            # Label it unmistakably: a future analyst must not read a checkpoint
+            # as a settled verdict and conclude the thesis already worked. The
+            # mandate rides along because it is what makes the elapsed days
+            # interpretable -- 63 days is early for one style and late for another.
+            mandate = f" | {e['mandate']}" if e.get("mandate") else ""
+            tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | in progress{mandate}]"
+        else:
+            raw = e["raw"] or "n/a"
+            alpha = e["alpha"] or "n/a"
+            holding = e["holding"] or "n/a"
+            tag = (
+                f"[{e['date']} | {e['ticker']} | {e['rating']} | "
+                f"{raw} | {alpha} | {holding}]"
+            )
         parts = [tag, f"DECISION:\n{e['decision']}"]
+        for r in reviews:
+            parts.append(
+                f"INTERIM REVIEW at {r['days']}d "
+                f"(raw {r['raw']} | alpha {r['alpha']}):\n{r['note']}"
+            )
         if e["reflection"]:
             parts.append(f"REFLECTION:\n{e['reflection']}")
         return "\n\n".join(parts)
 
     def _format_reflection_only(self, e: dict) -> str:
+        reviews = e.get("reviews", ())
+        if e.get("pending") and reviews:
+            latest = reviews[-1]
+            tag = (
+                f"[{e['date']} | {e['ticker']} | {e['rating']} | "
+                f"in progress, {latest['days']}d {latest['raw']}]"
+            )
+            return f"{tag}\n{latest['note']}"
         tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {e['raw'] or 'n/a'}]"
         if e["reflection"]:
             return f"{tag}\n{e['reflection']}"
