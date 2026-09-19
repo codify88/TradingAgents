@@ -53,7 +53,9 @@ EQUITY_MOMENTUM = Mandate(
     ),
     analyst_guidance={
         "market": (
-            "Trend structure is the primary signal at this horizon. Emphasise: "
+            "The primary trend is the signal at this horizon: 12-1 momentum, "
+            "6- and 12-month performance against the benchmark, and the 200-day "
+            "average. Shorter moves are entry timing, not direction. Emphasise: "
             "trailing returns over 1, 3, 6, and 12 months and how they rank "
             "against the benchmark and sector; position relative to the 52-week "
             "high; whether price is above a rising 50- and 200-day average; "
@@ -88,14 +90,20 @@ EQUITY_MOMENTUM = Mandate(
         ),
     },
     rating_guidance=(
-        "Buy requires confirmed price momentum, fundamental growth that "
-        "supports it, and an invalidation level that is close enough to make "
-        "the risk tolerable. Overweight fits a constructive trend with one "
-        "weak leg. Hold covers extended-but-intact positions where a new entry "
-        "is not attractive. Underweight and Sell belong where the trend has "
-        "broken or where estimate revisions have turned down -- act on "
-        "deterioration early rather than waiting for confirmation, because at "
-        "this horizon the cost of being late exceeds the cost of being early."
+        "Set the direction from the primary trend -- 12-1 momentum, 6- and "
+        "12-month performance against the benchmark, and the 200-day average -- "
+        "because that is the signal that persists over months; one- and "
+        "three-month moves tend to reverse, which is why the factor skips the "
+        "latest month. Buy requires a strong primary trend, fundamental growth "
+        "that supports it, and an invalidation level close enough to make the "
+        "risk tolerable. Overweight fits a strong primary trend with one weak "
+        "leg. Hold covers a strong primary trend in a pullback -- below the "
+        "50-day while the 200-day still rises -- and extended positions where a "
+        "new entry is not attractive: a pullback is a question of when to add, "
+        "not whether to cut. Underweight and Sell need one of: the primary trend "
+        "broken (price below a falling 200-day, or lagging the benchmark over "
+        "both 6 and 12 months); estimate revisions verifiably turned down; or "
+        "the growth screens failing with the price trend already confirming it."
     ),
     disqualifiers=(
         "Price momentum and fundamental momentum point in opposite directions "
@@ -116,11 +124,11 @@ EQUITY_MOMENTUM = Mandate(
         "that is what a loss actually costs; the chance the fundamental leg turns "
         "first (decelerating growth, estimate revisions rolling over), because "
         "price usually follows it; and crowding, because a consensus long unwinds "
-        "faster than it accumulated. Unlike a long-horizon mandate, a drawdown "
-        "here is not an opportunity to add -- it is evidence against the thesis "
-        "until the trend structure repairs. Act early on deterioration rather "
-        "than waiting for confirmation: at this horizon the cost of being late "
-        "exceeds the cost of being early."
+        "faster than it accumulated. A pullback inside an intact primary trend "
+        "is the normal cost of holding a momentum name, not evidence against "
+        "the thesis; the thesis is broken when the primary trend breaks or the "
+        "invalidation level fires. Do not add into a pullback until the trend "
+        "structure confirms, and do not cut on one either."
     ),
     analysts=MOMENTUM_ANALYSTS,
 )

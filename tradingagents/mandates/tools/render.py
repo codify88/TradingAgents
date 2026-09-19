@@ -30,7 +30,9 @@ def screens_block(screens, mandate: str) -> str:
     lines.append(
         "TRIPPED means the numbers meet the disqualifier. WATCH means they meet it "
         "on one reading but not another -- say which reading you believe and why. "
-        "NO DATA means the data cannot settle it; say so, do not guess."
+        "NO DATA means the data cannot settle it; say so, do not guess. Report every "
+        "status exactly as given: a CLEAR or TRIPPED is settled by the numbers, and a "
+        "different reading of your own may sit beside it but never replaces it."
     )
     return "\n".join(lines)
 

@@ -187,7 +187,8 @@ def render_mandate_context(mandate: Mandate | None) -> str:
     if mandate.disqualifiers:
         lines.append(
             "Hard screens -- if any holds, the position cannot be rated Buy or "
-            "Overweight no matter how strong the rest of the case:\n"
+            "Overweight no matter how strong the rest of the case. A tripped screen "
+            "bars adding; on its own it is not a case for Underweight or Sell:\n"
             + "\n".join(f"  - {d}" for d in mandate.disqualifiers)
         )
     if mandate.rating_guidance:

@@ -448,11 +448,42 @@ def test_shortlist_reaches_the_rendered_market_prompt():
 
 
 def test_momentum_mandate_frames_risk_for_its_horizon():
-    """A momentum drawdown is evidence against the thesis; a value drawdown may
-    be an opportunity. The risk framing must not be shared between them."""
+    """Momentum risk is the primary trend breaking past a named level; value
+    risk is different. The risk framing must not be shared between them."""
     assert EQUITY_MOMENTUM.risk_frame
     assert "invalidation" in EQUITY_MOMENTUM.risk_frame
     assert EQUITY_MOMENTUM.risk_frame != EQUITY_VALUE.risk_frame
+
+
+def test_momentum_mandate_rates_on_the_primary_trend():
+    """The first scored sweep cut NVDA twice on one-to-three-month pullbacks
+    inside a +28-31% 12-1 trend (both then rose ~19%), because the mandate said
+    to act early on deterioration. The direction comes from the primary trend;
+    a pullback caps the call at Hold."""
+    guidance = EQUITY_MOMENTUM.rating_guidance + EQUITY_MOMENTUM.risk_frame
+    assert "12-1" in EQUITY_MOMENTUM.rating_guidance
+    assert "200-day" in EQUITY_MOMENTUM.rating_guidance
+    assert "pullback" in EQUITY_MOMENTUM.rating_guidance
+    for dropped in ("cost of being late", "act early", "Act early"):
+        assert dropped not in guidance
+
+
+def test_a_tripped_screen_bars_adding_but_is_not_a_sell_signal():
+    text = render_mandate_context(EQUITY_MOMENTUM)
+    assert "not a case for Underweight or Sell" in text
+
+
+def test_screen_statuses_are_reported_as_given():
+    """NVDA 2025-11-25: the tool said CLEAR (the 50-day was rising), the analyst
+    wrote "I read this as TRIPPED", and the Portfolio Manager capped the rating
+    on it. A status the numbers settled is not the analyst's to relabel."""
+    from tradingagents.mandates.analysts.momentum import MOMENTUM_ANALYSTS
+    from tradingagents.mandates.analysts.value import VALUE_ANALYSTS
+    from tradingagents.mandates.tools.render import screens_block
+
+    assert "exactly as given" in screens_block([], "equity_momentum")
+    for analyst in MOMENTUM_ANALYSTS + VALUE_ANALYSTS:
+        assert "exactly as the tool" in analyst.system_message, analyst.key
 
 
 def test_both_mandates_are_now_fully_specified():
