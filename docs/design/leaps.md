@@ -98,15 +98,15 @@ Each LEAPS decision is graded three ways over the mandate horizon:
 The conviction check extends naturally: did the calls the agents chose beat the
 stock more often than calls they rejected would have?
 
-## Open decisions
+## Decisions (2026-09-19)
 
-1. **Overlay or standalone?** Recommended: overlay on an equity mandate
-   (`--mandate equity_momentum --instrument leaps`), because it reuses the
-   analysis and isolates the instrument decision for grading.
-2. **Which horizon?** Momentum's 126 days fits every chain. Value's 504 days
-   needs a roll or a shorter LEAPS horizon (252 days is a natural fit).
-3. **Target delta.** 0.75 (stock replacement) by default; 0.5 (at the money)
-   is a more leveraged, cheaper, more convex bet.
+1. **Overlay** on an equity mandate, not a standalone strategy: the equity
+   mandate decides direction, the LEAPS layer decides the instrument.
+2. **Momentum first**, graded on its own 126-day horizon. Value (which would
+   need a 252-day LEAPS clock or a roll) comes after.
+3. **Both delta targets are graded on every cell**: 0.75 (stock replacement)
+   and 0.5 (at the money). The agents judge the 0.75 contract; the 0.5 is
+   priced and graded alongside for comparison, at no extra model cost.
 
 ## Build order
 
