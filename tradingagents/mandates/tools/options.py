@@ -74,26 +74,59 @@ def bsm_call_delta(s: float, k: float, t: float, r: float, q: float, vol: float)
     return math.exp(-q * t) * _norm_cdf(_d1(s, k, t, r, q, vol))
 
 
-def implied_vol(price: float, s: float, k: float, t: float, r: float, q: float) -> float:
-    """The volatility at which ``bsm_call`` equals ``price``, or NaN.
+def bsm_put(s: float, k: float, t: float, r: float, q: float, vol: float) -> float:
+    """European put value, by put-call parity.
 
-    NaN when the price sits outside the no-arbitrage band for a call -- below
-    its discounted intrinsic value or above the discounted stock -- because no
-    volatility produces it, and a number forced out of that band would look like
-    a reading when it is a quote problem.
+    American puts carry more early-exercise value than calls -- a deep
+    in-the-money put is worth exercising to collect the strike's interest -- so
+    this European value slightly understates them, and an IV backed out of an
+    American put quote reads slightly high. At the deltas and tenors LEAPS
+    grading uses the effect is small against the spread.
+    """
+    if t <= 0:
+        return max(k - s, 0.0)
+    return bsm_call(s, k, t, r, q, vol) - s * math.exp(-q * t) + k * math.exp(-r * t)
+
+
+def bsm_put_delta(s: float, k: float, t: float, r: float, q: float, vol: float) -> float:
+    if t <= 0:
+        return -1.0 if s < k else 0.0
+    return bsm_call_delta(s, k, t, r, q, vol) - math.exp(-q * t)
+
+
+def bsm_price(kind: str, s: float, k: float, t: float, r: float, q: float, vol: float) -> float:
+    return (bsm_put if kind == "put" else bsm_call)(s, k, t, r, q, vol)
+
+
+def bsm_delta(kind: str, s: float, k: float, t: float, r: float, q: float, vol: float) -> float:
+    return (bsm_put_delta if kind == "put" else bsm_call_delta)(s, k, t, r, q, vol)
+
+
+def implied_vol(price: float, s: float, k: float, t: float, r: float, q: float,
+                kind: str = "call") -> float:
+    """The volatility at which the option's value equals ``price``, or NaN.
+
+    NaN when the price sits outside the no-arbitrage band -- below discounted
+    intrinsic value, or above the discounted stock (a call) or strike (a put) --
+    because no volatility produces it, and a number forced out of that band
+    would look like a reading when it is a quote problem.
     """
     if t <= 0 or price <= 0 or s <= 0 or k <= 0:
         return float("nan")
-    lower = max(s * math.exp(-q * t) - k * math.exp(-r * t), 0.0)
-    upper = s * math.exp(-q * t)
+    if kind == "put":
+        lower = max(k * math.exp(-r * t) - s * math.exp(-q * t), 0.0)
+        upper = k * math.exp(-r * t)
+    else:
+        lower = max(s * math.exp(-q * t) - k * math.exp(-r * t), 0.0)
+        upper = s * math.exp(-q * t)
     if not lower < price < upper:
         return float("nan")
     lo, hi = _VOL_LOW, _VOL_HIGH
-    if bsm_call(s, k, t, r, q, hi) < price:
+    if bsm_price(kind, s, k, t, r, q, hi) < price:
         return float("nan")
     for _ in range(100):
         mid = (lo + hi) / 2
-        if bsm_call(s, k, t, r, q, mid) < price:
+        if bsm_price(kind, s, k, t, r, q, mid) < price:
             lo = mid
         else:
             hi = mid
@@ -239,30 +272,36 @@ class PricedContract:
 
     @property
     def intrinsic(self) -> float:
-        return max(self.underlying - self.contract.strike, 0.0)
+        k, s = self.contract.strike, self.underlying
+        return max(k - s, 0.0) if self.contract.kind == "put" else max(s - k, 0.0)
 
     @property
     def extrinsic(self) -> float:
-        """Time value paid at the ask: what the call costs beyond exercising now."""
+        """Time value paid at the ask: what the option costs beyond exercising now."""
         return self.contract.ask - self.intrinsic
 
     @property
     def breakeven_move(self) -> float:
-        """The stock move to expiry at which the call bought at the ask breaks even."""
-        return (self.contract.strike + self.contract.ask) / self.underlying - 1
+        """The stock move to expiry at which the option bought at the ask breaks even
+        (negative for a put: the fall it needs)."""
+        k, ask = self.contract.strike, self.contract.ask
+        if self.contract.kind == "put":
+            return (k - ask) / self.underlying - 1
+        return (k + ask) / self.underlying - 1
 
     @property
     def leverage(self) -> float:
-        """Percent change in the call per 1% move in the stock, at the mid."""
-        return self.delta * self.underlying / self.contract.mid
+        """Percent change in the option per 1% move in the stock, at the mid,
+        in the direction the option profits from."""
+        return abs(self.delta) * self.underlying / self.contract.mid
 
 
 def price_contract(
     contract: Contract, underlying: float, date: str, rate: float, q: float,
 ) -> PricedContract:
     years = (contract.expiry - pd.Timestamp(date)).days / 365.0
-    iv = implied_vol(contract.mid, underlying, contract.strike, years, rate, q)
-    delta = (bsm_call_delta(underlying, contract.strike, years, rate, q, iv)
+    iv = implied_vol(contract.mid, underlying, contract.strike, years, rate, q, contract.kind)
+    delta = (bsm_delta(contract.kind, underlying, contract.strike, years, rate, q, iv)
              if not math.isnan(iv) else float("nan"))
     return PricedContract(contract, underlying, years, rate, q, iv, delta)
 
@@ -271,23 +310,39 @@ def select_call(
     chain, underlying: float, date: str, rate: float, q: float,
     horizon_days: int, target_delta: float,
 ) -> PricedContract | None:
+    """The call the LEAPS rule picks, or None when nothing qualifies (see :func:`select_option`)."""
+    return select_option(chain, underlying, date, rate, q, horizon_days, target_delta, "call")
+
+
+def select_put(
+    chain, underlying: float, date: str, rate: float, q: float,
+    horizon_days: int, target_delta: float,
+) -> PricedContract | None:
+    """The put the rule picks; ``target_delta`` is the magnitude (0.75 means -0.75)."""
+    return select_option(chain, underlying, date, rate, q, horizon_days, target_delta, "put")
+
+
+def select_option(
+    chain, underlying: float, date: str, rate: float, q: float,
+    horizon_days: int, target_delta: float, kind: str,
+) -> PricedContract | None:
     """The contract the LEAPS rule picks, or None when nothing qualifies.
 
     The shortest expiry that still runs ``EXPIRY_BUFFER_TRADING_DAYS`` past the
-    holding horizon, then the two-sided call whose computed delta is nearest the
-    target. A rule rather than a judgement, so every graded LEAPS decision is
-    reproducible from the chain alone.
+    holding horizon, then the two-sided contract of ``kind`` whose computed
+    delta is nearest the target in magnitude. A rule rather than a judgement, so
+    every graded LEAPS decision is reproducible from the chain alone.
     """
     need = pd.Timestamp(date) + pd.Timedelta(
         days=math.ceil((horizon_days + EXPIRY_BUFFER_TRADING_DAYS) * 365 / TRADING_DAYS_PER_YEAR))
-    calls = [c for c in chain if c.kind == "call" and c.two_sided and c.expiry >= need]
+    candidates = [c for c in chain if c.kind == kind and c.two_sided and c.expiry >= need]
     picks = []
-    for expiry in sorted({c.expiry for c in calls}):
-        priced = [price_contract(c, underlying, date, rate, q) for c in calls if c.expiry == expiry]
+    for expiry in sorted({c.expiry for c in candidates}):
+        priced = [price_contract(c, underlying, date, rate, q) for c in candidates if c.expiry == expiry]
         priced = [p for p in priced if not math.isnan(p.delta)]
         if not priced:
             continue
-        pick = min(priced, key=lambda p: (abs(p.delta - target_delta), p.contract.strike))
+        pick = min(priced, key=lambda p: (abs(abs(p.delta) - target_delta), p.contract.strike))
         # A newly listed expiry can have no open interest yet (KO's December
         # 2024 series at 2024-03-01): prefer the next one out that trades.
         if is_liquid(pick.contract):

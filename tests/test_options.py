@@ -43,6 +43,24 @@ class TestBlackScholesMerton:
         price = op.bsm_call(60, 55, 1.9, 0.045, 0.03, vol)
         assert op.implied_vol(price, 60, 55, 1.9, 0.045, 0.03) == pytest.approx(vol, abs=1e-4)
 
+    def test_put_call_parity(self):
+        c = op.bsm_call(100, 95, 1.5, 0.04, 0.02, 0.3)
+        p = op.bsm_put(100, 95, 1.5, 0.04, 0.02, 0.3)
+        assert c - p == pytest.approx(100 * math.exp(-0.02 * 1.5) - 95 * math.exp(-0.04 * 1.5))
+
+    def test_matches_the_textbook_put(self):
+        """Hull Example 15.6 again: the put on S=42, K=40, r=10%, sigma=20%, T=0.5 is 0.81."""
+        assert op.bsm_put(42, 40, 0.5, 0.10, 0.0, 0.20) == pytest.approx(0.81, abs=0.005)
+
+    def test_put_delta_is_call_delta_less_one_without_dividends(self):
+        cd = op.bsm_call_delta(49, 50, 0.3846, 0.05, 0.0, 0.2)
+        assert op.bsm_put_delta(49, 50, 0.3846, 0.05, 0.0, 0.2) == pytest.approx(cd - 1)
+
+    @pytest.mark.parametrize("vol", [0.15, 0.4])
+    def test_put_implied_vol_recovers_the_input(self, vol):
+        price = op.bsm_put(60, 65, 1.9, 0.045, 0.03, vol)
+        assert op.implied_vol(price, 60, 65, 1.9, 0.045, 0.03, "put") == pytest.approx(vol, abs=1e-4)
+
     def test_implied_vol_is_undefined_below_intrinsic(self):
         """A quote under discounted intrinsic has no volatility; NaN, not a number."""
         assert math.isnan(op.implied_vol(3.0, 60, 50, 1.0, 0.04, 0.0))
@@ -174,3 +192,35 @@ class TestSelectCall:
         assert p.breakeven_move == pytest.approx((c.strike + c.ask) / 100 - 1)
         assert p.leverage == pytest.approx(p.delta * 100 / c.mid)
         assert p.extrinsic == pytest.approx(c.ask - max(100 - c.strike, 0))
+
+
+class TestSelectPut:
+    def _chain(self, s=100.0, date="2025-09-02", vol=0.35):
+        out = []
+        for expiry in ("2026-06-18", "2027-01-15"):
+            t = (pd.Timestamp(expiry) - pd.Timestamp(date)).days / 365
+            for k in range(60, 170, 10):
+                v = op.bsm_put(s, k, t, 0.04, 0.0, vol)
+                out.append(op.Contract(f"P{expiry}{k}", pd.Timestamp(expiry), float(k), "put",
+                                       round(v * 0.99, 2), round(v * 1.01, 2), 500, 10))
+        return out + _chain()  # calls alongside must be ignored
+
+    @pytest.mark.parametrize("target", [0.75, 0.5])
+    def test_picks_the_put_nearest_the_target_magnitude(self, target):
+        p = op.select_put(self._chain(), 100.0, "2025-09-02", 0.04, 0.0, 126, target)
+        assert p.contract.kind == "put" and p.delta < 0
+        same = [op.price_contract(c, 100.0, "2025-09-02", 0.04, 0.0) for c in self._chain()
+                if c.kind == "put" and c.expiry == p.contract.expiry]
+        assert abs(abs(p.delta) - target) == min(abs(abs(x.delta) - target) for x in same)
+        assert p.iv == pytest.approx(0.35, abs=0.02)
+
+    def test_a_deeper_put_has_a_higher_strike(self):
+        deep = op.select_put(self._chain(), 100.0, "2025-09-02", 0.04, 0.0, 126, 0.75)
+        atm = op.select_put(self._chain(), 100.0, "2025-09-02", 0.04, 0.0, 126, 0.5)
+        assert deep.contract.strike > atm.contract.strike
+
+    def test_put_breakeven_is_the_fall_it_needs(self):
+        p = op.select_put(self._chain(), 100.0, "2025-09-02", 0.04, 0.0, 126, 0.5)
+        c = p.contract
+        assert p.breakeven_move == pytest.approx((c.strike - c.ask) / 100 - 1)
+        assert p.breakeven_move < 0

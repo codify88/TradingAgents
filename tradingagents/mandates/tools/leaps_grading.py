@@ -17,6 +17,11 @@ Every cell is graded two ways against the stock:
 
 Calls the agents chose are compared with the calls they passed on (Buy or
 Overweight held as stock), which is the check on their instrument judgement.
+
+Underweight and Sell cells are graded the same way on the rule's *put*, against
+a matched short position of |delta| shares (which pays the dividends a short
+owes). No mandate offers puts yet; this measures whether one should, before any
+agent is asked to choose one (docs/design/leaps.md).
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import pandas as pd
 from . import leaps as lp, options as op
 
 POSITION_RATINGS = ("Buy", "Overweight")
+BEARISH_RATINGS = ("Underweight", "Sell")
 # How many trading days back to look for the contract's exit quote when the
 # exit day's chain lacks it (a holiday gap, a missing print).
 EXIT_QUOTE_LOOKBACK_DAYS = 5
@@ -37,6 +43,7 @@ EXIT_QUOTE_LOOKBACK_DAYS = 5
 @dataclass(frozen=True)
 class OptionOutcome:
     contract_id: str
+    kind: str                    # "call" or "put"
     target_delta: float
     delta: float
     entry_ask: float
@@ -51,14 +58,16 @@ class OptionOutcome:
 
     @property
     def edge_vs_matched(self) -> float:
-        """Call P&L minus the P&L of ``delta`` shares, as a fraction of the stock price.
+        """Option P&L minus the P&L of ``delta`` shares, as a fraction of the stock price.
 
-        Positive means the call beat the stock exposure it replaced after paying
-        its time value, both spreads and the dividends it forwent.
+        ``delta`` is signed, so a put is matched by a short position of |delta|
+        shares, whose P&L on the total return includes the dividends a short
+        pays. Positive means the option beat the stock exposure it replaced
+        after its time value and both spreads.
         """
-        call_pnl = self.exit_value - self.entry_ask
+        option_pnl = self.exit_value - self.entry_ask
         matched_pnl = self.delta * self.underlying_entry * self.stock_return
-        return (call_pnl - matched_pnl) / self.underlying_entry
+        return (option_pnl - matched_pnl) / self.underlying_entry
 
 
 def _exit_day(index: pd.DatetimeIndex, date: str, horizon_days: int) -> pd.Timestamp | None:
@@ -75,7 +84,9 @@ def _exit_value(contract: op.Contract, index: pd.DatetimeIndex, raw_close: pd.Se
         closes = raw_close.loc[:contract.expiry]
         if closes.empty:
             return None
-        return max(float(closes.iloc[-1]) - contract.strike, 0.0), contract.expiry
+        s = float(closes.iloc[-1])
+        intrinsic = contract.strike - s if contract.kind == "put" else s - contract.strike
+        return max(intrinsic, 0.0), contract.expiry
     pos = index.get_loc(exit_day)
     for back in range(EXIT_QUOTE_LOOKBACK_DAYS + 1):
         day = index[pos - back]
@@ -85,8 +96,9 @@ def _exit_value(contract: op.Contract, index: pd.DatetimeIndex, raw_close: pd.Se
     return None
 
 
-def grade(symbol: str, date: str, horizon_days: int, target_delta: float) -> OptionOutcome | None:
-    """The rule's call on ``date``, held ``horizon_days`` and sold at the bid; None when ungradable."""
+def grade(symbol: str, date: str, horizon_days: int, target_delta: float,
+          kind: str = "call") -> OptionOutcome | None:
+    """The rule's option on ``date``, held ``horizon_days`` and sold at the bid; None when ungradable."""
     from .financials import alpha_vantage_daily_strict
 
     frame = op.with_retry(lambda: alpha_vantage_daily_strict(symbol))
@@ -100,7 +112,8 @@ def grade(symbol: str, date: str, horizon_days: int, target_delta: float) -> Opt
     s = float(entry.iloc[-1])
     r = op.risk_free_rate(date)
     q = op.dividend_yield(symbol, date, s)
-    picked = op.select_call(op.option_chain(symbol, date), s, date, r, q, horizon_days, target_delta)
+    picked = op.select_option(op.option_chain(symbol, date), s, date, r, q, horizon_days,
+                              target_delta, kind)
     if picked is None:
         return None
     exit_ = _exit_value(picked.contract, index, frame["Raw Close"], exit_day, symbol)
@@ -111,7 +124,8 @@ def grade(symbol: str, date: str, horizon_days: int, target_delta: float) -> Opt
     entry_adj = float(close.loc[:pd.Timestamp(date)].iloc[-1])
     stock_return = float(close.loc[:when].iloc[-1]) / entry_adj - 1
     return OptionOutcome(
-        contract_id=picked.contract.contract_id, target_delta=target_delta, delta=picked.delta,
+        contract_id=picked.contract.contract_id, kind=kind, target_delta=target_delta,
+        delta=picked.delta,
         entry_ask=picked.contract.ask, exit_value=value, exit_date=when,
         underlying_entry=s, stock_return=stock_return,
     )
@@ -123,7 +137,7 @@ class GradedCell:
     date: str
     rating: str
     instrument: str | None
-    judged: OptionOutcome | None       # the 0.75-delta contract the agents weighed
+    judged: OptionOutcome | None       # the 0.75-delta contract (the one the agents weigh for calls)
     comparison: OptionOutcome | None   # the at-the-money contract, graded alongside
     error: str | None = None           # a vendor failure, reported rather than read as "ungradable"
 
@@ -132,12 +146,16 @@ def review(entries, horizon_days: int = 126, deltas: tuple[float, float] = (0.75
     """Grade every Buy/Overweight cell in a backtest log's entries."""
     cells = []
     for e in entries:
-        if e.get("rating") not in POSITION_RATINGS:
+        if e.get("rating") in POSITION_RATINGS:
+            kind = "call"
+        elif e.get("rating") in BEARISH_RATINGS:
+            kind = "put"
+        else:
             continue
         instrument = lp.decision_instrument(e.get("decision", ""))
         try:
-            judged = grade(e["ticker"], e["date"], horizon_days, deltas[0])
-            comparison = grade(e["ticker"], e["date"], horizon_days, deltas[1])
+            judged = grade(e["ticker"], e["date"], horizon_days, deltas[0], kind)
+            comparison = grade(e["ticker"], e["date"], horizon_days, deltas[1], kind)
         except Exception as exc:  # one vendor failure must not end the review
             cells.append(GradedCell(e["ticker"], e["date"], e["rating"], instrument, None, None,
                                     error=f"{type(exc).__name__}: {exc}"))
@@ -155,9 +173,9 @@ def _mean(xs) -> float:
     return sum(xs) / len(xs) if xs else float("nan")
 
 
-def render(cells: list[GradedCell]) -> str:
-    if not cells:
-        return "No Buy or Overweight cells to grade: only a position can be held through a call."
+def _table(cells: list[GradedCell], kind: str) -> list[str]:
+    word = "Call" if kind == "call" else "Put"
+    matched = "shares" if kind == "call" else "short"
     rows = []
     for c in cells:
         j, a = c.judged, c.comparison
@@ -168,27 +186,69 @@ def render(cells: list[GradedCell]) -> str:
             f"{_pct(j.option_return) if j else 'n/a'} | {_pct(j.edge_vs_matched) if j else 'n/a'} | "
             f"{_pct(a.option_return) if a else 'n/a'} | {_pct(a.edge_vs_matched) if a else 'n/a'} |"
         )
-    graded = [c for c in cells if c.judged]
-    errors = [c for c in cells if c.error]
-    chosen = [c.judged.edge_vs_matched for c in graded if c.instrument == "Call"]
-    passed = [c.judged.edge_vs_matched for c in graded if c.instrument == "Stock"]
-    lines = [
-        "| Ticker | Date | Rating | Instrument | Contract (delta 0.75) | Stock | Call | "
-        "Call vs matched shares | ATM call | ATM vs matched |",
+    return [
+        f"| Ticker | Date | Rating | Instrument | Contract (delta {'' if kind == 'call' else '-'}0.75) "
+        f"| Stock | {word} | {word} vs matched {matched} | ATM {word.lower()} | ATM vs matched |",
         "|---|---|---|---|---|---|---|---|---|---|",
         *rows,
-        "",
-        f"Graded {len(graded)} of {len(cells)} position cells "
+    ]
+
+
+def _coverage(cells: list[GradedCell], what: str) -> str:
+    graded = [c for c in cells if c.judged]
+    errors = [c for c in cells if c.error]
+    return (
+        f"Graded {len(graded)} of {len(cells)} {what} "
         f"({len(cells) - len(graded)} ungradable: not yet at the horizon, no qualifying "
         f"contract, or no exit quote)"
-        + (f"; {len(errors)} of those failed on the vendor and should be rerun." if errors else "."),
-        f"- Calls the agents chose: {len(chosen)}, mean edge over matched shares "
-        f"{_pct(_mean(chosen))}.",
-        f"- Calls they passed on (held as stock): {len(passed)}, mean edge the call "
-        f"would have had {_pct(_mean(passed))}.",
-        "Edge is the call's P&L minus that of delta shares, as a share of the stock "
-        "price: positive means the call beat the stock exposure it replaced after "
-        "time value, both spreads and forgone dividends. The instrument judgement "
-        "is working when chosen calls out-edge the ones passed on.",
-    ]
-    return "\n".join(lines)
+        + (f"; {len(errors)} of those failed on the vendor and should be rerun." if errors else ".")
+    )
+
+
+def render(cells: list[GradedCell]) -> str:
+    calls = [c for c in cells if c.rating in POSITION_RATINGS]
+    puts = [c for c in cells if c.rating in BEARISH_RATINGS]
+    if not cells:
+        return "No Buy, Overweight, Underweight or Sell cells to grade: a Hold takes no position."
+    lines: list[str] = []
+
+    if calls:
+        graded = [c for c in calls if c.judged]
+        chosen = [c.judged.edge_vs_matched for c in graded if c.instrument == "Call"]
+        passed = [c.judged.edge_vs_matched for c in graded if c.instrument == "Stock"]
+        lines += [
+            "### Calls on Buy and Overweight",
+            *_table(calls, "call"),
+            "",
+            _coverage(calls, "position cells"),
+            f"- Calls the agents chose: {len(chosen)}, mean edge over matched shares "
+            f"{_pct(_mean(chosen))}.",
+            f"- Calls they passed on (held as stock): {len(passed)}, mean edge the call "
+            f"would have had {_pct(_mean(passed))}.",
+            "Edge is the call's P&L minus that of delta shares, as a share of the stock "
+            "price: positive means the call beat the stock exposure it replaced after "
+            "time value, both spreads and forgone dividends. The instrument judgement "
+            "is working when chosen calls out-edge the ones passed on.",
+            "",
+        ]
+
+    if puts:
+        graded = [c for c in puts if c.judged]
+        edges = [c.judged.edge_vs_matched for c in graded]
+        returns = [c.judged.option_return for c in graded]
+        fell = [c for c in graded if c.judged.stock_return < 0]
+        beat = [e for e in edges if e > 0]
+        lines += [
+            "### Puts on Underweight and Sell (not offered to the agents; would they help?)",
+            *_table(puts, "put"),
+            "",
+            _coverage(puts, "bearish cells"),
+            f"- The stock fell in {len(fell)} of {len(graded)}: a put pays only when it does.",
+            f"- Mean put return {_pct(_mean(returns))}; mean edge over a matched short "
+            f"{_pct(_mean(edges))}; the put beat its matched short in {len(beat)} of {len(edges)}.",
+            "Edge is the put's P&L minus that of a short position of |delta| shares "
+            "(which pays the stock's dividends), as a share of the stock price. Puts "
+            "belong in the mandate only if bearish calls are right often enough, and "
+            "the put's capped loss worth enough, to make this positive.",
+        ]
+    return "\n".join(lines).rstrip()
