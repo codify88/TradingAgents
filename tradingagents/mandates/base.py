@@ -41,6 +41,13 @@ MARKET_ANALYST_INDICATORS = frozenset({
 })
 
 
+# The downstream agents a mandate may address by role in ``agent_guidance``.
+DOWNSTREAM_AGENTS = frozenset({
+    "bull", "bear", "research_manager", "trader",
+    "aggressive", "conservative", "neutral", "portfolio_manager",
+})
+
+
 @dataclass(frozen=True)
 class Mandate:
     """A named investment style with its own horizon, benchmark, and framing."""
@@ -69,6 +76,11 @@ class Mandate:
     # Upstream's debate implicitly treats risk as volatility; a long-horizon
     # value mandate means permanent loss of capital, which is a different debate.
     risk_frame: str = ""
+    # Role-specific text for the downstream agents, keyed by DOWNSTREAM_AGENTS.
+    # The shared mandate block tells every agent the same thing; this is where a
+    # mandate narrows one role -- the Trader's stop-loss habit, the Conservative
+    # debater's volatility framing -- without editing that agent's upstream prompt.
+    agent_guidance: dict[str, str] = field(default_factory=dict)
 
     # --- extra analysts -------------------------------------------------------
     # Personas this mandate adds after upstream's analysts, each with its own
@@ -96,6 +108,12 @@ class Mandate:
             raise ValueError(
                 f"mandate {self.name!r}: unknown indicator(s) in "
                 f"indicator_shortlist: {', '.join(sorted(unknown))}"
+            )
+        unknown_agents = set(self.agent_guidance) - DOWNSTREAM_AGENTS
+        if unknown_agents:
+            raise ValueError(
+                f"mandate {self.name!r}: unknown agent(s) in agent_guidance: "
+                f"{', '.join(sorted(unknown_agents))}"
             )
         keys = [a.key for a in self.analysts]
         if len(keys) != len(set(keys)):

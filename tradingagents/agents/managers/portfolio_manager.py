@@ -29,7 +29,7 @@ def create_portfolio_manager(llm):
 
     def portfolio_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
-        mandate_context = mandate_section(state)
+        mandate_context = mandate_section(state, "portfolio_manager")
         portfolio_context = get_portfolio_context_from_state(state)
 
         history = state["risk_debate_state"]["history"]

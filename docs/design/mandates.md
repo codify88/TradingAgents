@@ -40,6 +40,7 @@ behalf, over what horizon, judged how*. They are orthogonal:
 | `disqualifiers` | Hard screens that force Sell/Hold regardless of the debate |
 | `indicator_shortlist` | Which technical indicators are even relevant |
 | `risk_frame` | What "risk" means to the trader, risk debate and PM (e.g. permanent capital loss, not volatility) |
+| `agent_guidance` | Per-role text for the downstream agents (`trader`, `aggressive`, `conservative`, `neutral`, and the researchers and managers), appended to the mandate block that role reads |
 | `analysts` | Extra personas the mandate adds to the analyst team, each with its own tools |
 
 Prompts stay upstream's. The mandate is **injected**, never forked, so
@@ -141,6 +142,13 @@ rather than fill it from memory.
 3. **Point-in-time discipline.** Upstream already gates memory lessons by
    resolution date (#1251). Longer horizons make look-ahead leakage easier, not
    harder - hold the line.
+4. **Lessons stay in their mandate.** The Portfolio Manager is shown only
+   lessons written under the run's own mandate (an unmandated run sees only
+   unmandated ones): a value lesson that a drawdown was an opportunity is the
+   wrong lesson for a momentum horizon.
+5. **Upstream analysts cite, too.** Under a mandate the four upstream analysts
+   get the same evidence rules as the mandate analysts: figures from tool
+   output only, no recomputed returns, no dates from memory.
 
 ## Status
 

@@ -21,7 +21,7 @@ def create_bear_researcher(llm):
         news_report = report_or_absent(state["news_report"], "news")
         fundamentals_report = report_or_absent(state["fundamentals_report"], "fundamentals")
         instrument_context = get_instrument_context_from_state(state)
-        mandate_context = mandate_section(state)
+        mandate_context = mandate_section(state, "bear")
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
         fundamentals_label = (

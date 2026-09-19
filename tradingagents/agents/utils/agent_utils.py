@@ -242,7 +242,7 @@ def get_mandate_context_from_state(state: Mapping[str, Any]) -> str:
         return ""
 
 
-def mandate_section(state: Mapping[str, Any]) -> str:
+def mandate_section(state: Mapping[str, Any], agent: str | None = None) -> str:
     """The mandate block as a prompt section, blank-padded, or ''.
 
     Lets an agent write ``{mandate_section}`` inline without leaving a stray
@@ -252,14 +252,47 @@ def mandate_section(state: Mapping[str, Any]) -> str:
     interpolates this section, so a mandate analyst's findings reach the
     researchers, trader, risk debate and portfolio manager with no edit to
     their prompts.
+
+    ``agent`` names the caller's role (see ``mandates.base.DOWNSTREAM_AGENTS``);
+    the mandate's guidance for that role, if any, closes the section.
     """
     context = get_mandate_context_from_state(state)
     if not context:
         return ""
     from tradingagents.mandates.graph import render_mandate_reports
 
+    parts = [context]
     reports = render_mandate_reports(state)
-    return f"{context}\n\n{reports}\n\n" if reports else f"{context}\n\n"
+    if reports:
+        parts.append(reports)
+    mandate = _mandate_of(state)
+    guidance = mandate.agent_guidance.get(agent or "", "") if mandate else ""
+    if guidance:
+        parts.append(f"MANDATE-SPECIFIC GUIDANCE for your role: {guidance}")
+    return "\n\n".join(parts) + "\n\n"
+
+
+def _mandate_of(state: Mapping[str, Any]):
+    """The run's Mandate object, or None when unset or unknown to this build."""
+    from tradingagents.mandates import get_mandate
+
+    try:
+        return get_mandate(state.get("mandate"))
+    except ValueError:
+        return None
+
+
+# The mandate analysts' citation discipline, extended to upstream's four under a
+# mandate. In the TSLA runs the upstream analysts invented an earnings date and
+# hand-computed returns that disagreed with the tools; a mandate's hard screens
+# and graded horizons make those errors cost more than they do upstream.
+MANDATE_EVIDENCE_RULES = (
+    "EVIDENCE RULES for this analysis: every figure you state must come from tool "
+    "output or data supplied in this run. Cite it; do not recompute returns, ratios or growth rates "
+    "yourself, and never supply a number, date or event from memory. A future date "
+    "(earnings, a launch, a deadline) may be stated only if a tool returned it. If "
+    "a figure you need was not returned, say it is unavailable."
+)
 
 
 def apply_mandate_to_system_message(
@@ -292,14 +325,9 @@ def apply_mandate_to_system_message(
     if not context:
         return system_message
 
-    parts = [context, system_message]
+    parts = [context, system_message, MANDATE_EVIDENCE_RULES]
 
-    from tradingagents.mandates import get_mandate
-
-    try:
-        mandate = get_mandate(state.get("mandate"))
-    except ValueError:
-        mandate = None
+    mandate = _mandate_of(state)
     guidance = mandate.guidance_for(analyst_key) if mandate else ""
     if guidance:
         parts.append(

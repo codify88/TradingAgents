@@ -92,6 +92,37 @@ EQUITY_VALUE = Mandate(
         "No margin of safety: the price already embeds an optimistic case.",
     ),
     indicator_shortlist=("close_200_sma", "close_50_sma", "atr"),
+    # Upstream's Trader always asks for a stop-loss and its Conservative
+    # debater argues from volatility; both contradict the risk frame below,
+    # and in the TSLA value run the Trader set price stops anyway.
+    agent_guidance={
+        "trader": (
+            "Do not set a volatility or ATR-based stop-loss: this mandate exits on a "
+            "named break in the thesis, not on a price move. Leave Stop Loss out "
+            "unless a specific price would itself prove the thesis broken, and then "
+            "name that break. Take the entry range from the Valuation Analyst's "
+            "value-per-share grid, and size to the margin of safety, not to recent "
+            "volatility."
+        ),
+        "aggressive": (
+            "The upside you argue for is the gap to a conservative intrinsic value, "
+            "compounding over years -- not a near-term move. Argue from business "
+            "quality and margin of safety; short-term price strength is not evidence "
+            "here."
+        ),
+        "conservative": (
+            "Risk under this mandate is permanent loss of capital, not volatility. "
+            "Argue caution from overpayment against a conservative value, balance-sheet "
+            "strain, eroding returns on capital and poor capital allocation -- not "
+            "from price swings or drawdowns, which this mandate treats as noise "
+            "unless they change what the business is worth."
+        ),
+        "neutral": (
+            "Weigh the chance and depth of permanent loss against the margin of "
+            "safety. Treat price volatility as noise unless it reflects a change in "
+            "the business."
+        ),
+    },
     risk_frame=(
         "risk is permanent loss of capital, not volatility. A deep drawdown in a "
         "business whose earning power is intact is an opportunity; a flat price "

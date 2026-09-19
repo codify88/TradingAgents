@@ -529,6 +529,101 @@ def test_the_run_state_carries_the_mandate_to_every_downstream_agent(tmp_path):
     assert mandate_section(state).startswith("INVESTMENT MANDATE")
 
 
+def test_the_run_state_teaches_only_this_mandates_lessons(tmp_path):
+    g = object.__new__(TradingAgentsGraph)
+    g.mandate_name = "equity_momentum"
+    g.mandate = get_mandate("equity_momentum")
+    g.mandate_context = render_mandate_context(g.mandate)
+    g.config = {"benchmark_map": {"": "SPY"}, "benchmark_ticker": None}
+    g.propagator = Propagator()
+    g.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "log.md")})
+    g.resolve_instrument_context = lambda *a, **k: "ticker NVDA"
+    g._memory_as_of = lambda d: None
+    g._resolve_pending_entries = lambda t: None
+    for mandate, lesson in (("equity_value", "value lesson"), ("equity_momentum", "momentum lesson")):
+        g.memory_log.store_decision("NVDA", "2026-01-05", f"Rating: Buy\n{lesson}", mandate=mandate)
+        g.memory_log.update_with_outcome("NVDA", "2026-01-05", 0.05, 0.02, 126, lesson,
+                                         resolution_date="2026-07-01", mandate=mandate)
+
+    state = TradingAgentsGraph.create_run_state(g, "NVDA", "2026-09-17")
+
+    assert "momentum lesson" in state["past_context"]
+    assert "value lesson" not in state["past_context"]
+
+
+# --- role guidance and evidence rules ----------------------------------------
+
+
+def _state(mandate):
+    return {"mandate": mandate, "mandate_context": render_mandate_context(get_mandate(mandate))}
+
+
+def test_the_value_trader_is_told_not_to_set_volatility_stops():
+    """The TSLA value run's Trader named price stops, against the risk frame."""
+    text = mandate_section(_state("equity_value"), "trader")
+    assert "MANDATE-SPECIFIC GUIDANCE for your role" in text
+    assert "stop-loss" in text
+
+
+def test_role_guidance_reaches_only_its_role():
+    state = _state("equity_value")
+    trader = EQUITY_VALUE.agent_guidance["trader"]
+    assert trader in mandate_section(state, "trader")
+    assert trader not in mandate_section(state, "bull")
+    assert trader not in mandate_section(state)
+
+
+def test_the_value_conservative_argues_permanent_loss_not_volatility():
+    text = mandate_section(_state("equity_value"), "conservative")
+    assert "permanent loss" in text
+
+
+def test_every_downstream_agent_passes_its_role():
+    """Role guidance only lands if each agent names itself; a merge that drops
+    the argument would silently fall back to the shared block."""
+    import inspect
+
+    from tradingagents.agents.managers import portfolio_manager, research_manager
+    from tradingagents.agents.researchers import bear_researcher, bull_researcher
+    from tradingagents.agents.risk_mgmt import (
+        aggressive_debator,
+        conservative_debator,
+        neutral_debator,
+    )
+    from tradingagents.agents.trader import trader
+    from tradingagents.mandates.base import DOWNSTREAM_AGENTS
+
+    modules = {
+        "bull": bull_researcher, "bear": bear_researcher,
+        "research_manager": research_manager, "trader": trader,
+        "aggressive": aggressive_debator, "conservative": conservative_debator,
+        "neutral": neutral_debator, "portfolio_manager": portfolio_manager,
+    }
+    assert set(modules) == DOWNSTREAM_AGENTS
+    for role, module in modules.items():
+        assert f'mandate_section(state, "{role}")' in inspect.getsource(module), role
+
+
+def test_agent_guidance_rejects_an_unknown_role():
+    from dataclasses import replace
+
+    with pytest.raises(ValueError, match="unknown agent"):
+        replace(EQUITY_VALUE, agent_guidance={"traderr": "x"})
+
+
+def test_upstream_analysts_get_the_evidence_rules_under_a_mandate():
+    from tradingagents.agents.utils.agent_utils import (
+        MANDATE_EVIDENCE_RULES,
+        apply_mandate_to_system_message,
+    )
+
+    rendered = apply_mandate_to_system_message(_state("equity_momentum"), "market", "UPSTREAM PROMPT")
+    assert MANDATE_EVIDENCE_RULES in rendered
+    assert rendered.index("UPSTREAM PROMPT") < rendered.index("EVIDENCE RULES")
+    # No mandate: byte-identical to upstream.
+    assert apply_mandate_to_system_message({}, "market", "UPSTREAM PROMPT") == "UPSTREAM PROMPT"
+
+
 # --- superseding a decision ------------------------------------------------
 
 

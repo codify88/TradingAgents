@@ -22,6 +22,28 @@ EQUITY_MOMENTUM = Mandate(
     # None -> config benchmark_map (see the note in equity_value). Set MTUM
     # here to grade within the momentum factor instead of against the market.
     benchmark=None,
+    agent_guidance={
+        "trader": (
+            "Use the Momentum Analyst's invalidation level as the stop-loss, state "
+            "its distance in ATRs, and size the position so that the stop firing is "
+            "a tolerable loss. A thesis without that level cannot be sized."
+        ),
+        "aggressive": (
+            "The upside you argue for is trend persistence over months, backed by "
+            "leadership against the benchmark and accelerating growth. Accept the "
+            "stop the invalidation level defines rather than arguing it away."
+        ),
+        "conservative": (
+            "Risk under this mandate is the trend breaking while it is held: argue "
+            "from the distance to invalidation in ATRs, from the growth leg turning, "
+            "and from crowding. Whether the stock looks expensive matters only "
+            "through the multiple-expansion screen, not as a general objection."
+        ),
+        "neutral": (
+            "Weigh the distance to the invalidation level against the strength of "
+            "the price trend and of the growth leg behind it."
+        ),
+    },
     thesis_frame=(
         "that growth is real, accelerating or durably high, and better than the "
         "market currently expects; that the price trend confirms it rather than "
