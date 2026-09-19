@@ -116,6 +116,10 @@ class TestRatesAndDividends:
         with patch.object(op, "_make_api_request", return_value=payload):
             assert op.risk_free_rate("2024-03-02") == pytest.approx(0.0453)
 
+    def test_a_company_that_never_paid_has_a_zero_yield(self):
+        with patch.object(op, "_make_api_request", return_value={"data": []}):
+            assert op.dividend_yield("RKLB", "2025-09-02", 25.0) == 0.0
+
     def test_dividend_yield_counts_only_the_trailing_year_already_ex(self):
         payload = {"data": [
             {"ex_dividend_date": "2024-03-14", "amount": "0.485"},   # after the date

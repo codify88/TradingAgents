@@ -253,6 +253,11 @@ def dividend_yield(symbol: str, date: str, price: float) -> float:
         return float("nan")
     end = pd.Timestamp(date)
     d = _dividends(symbol)
+    if d.empty:
+        # A company that has never paid has a yield of zero. (An empty series
+        # has an integer index, and filtering it by date raised -- which made
+        # the LEAPS tool UNAVAILABLE for every non-payer: RKLB, APP, MP, PLTR.)
+        return 0.0
     paid = d[(d.index > end - pd.Timedelta(days=365)) & (d.index <= end)].sum()
     return float(paid / price)
 
