@@ -79,6 +79,18 @@ those: ZION+O, AEP+PZ) or by the filed name. Checked against the full listing
 for false positives: class shares (GOOGL), "Preferred Bank" and a royalty
 trust's units (MARPS) are kept.
 
+Alpha Vantage also files pooled vehicles as "Stock" -- ETFs, exchange-traded
+notes, leveraged and inverse products, closed-end funds, term trusts -- and
+those are dropped by name (REITs and royalty trusts are common shares and
+kept). A symbol listed twice on the screen date under one name is kept once;
+under two names it is a reused ticker (DFNS was both IronNet and T3 Defense)
+whose prices cannot be attributed, and neither is kept. Several symbols under
+one identical name are lines of one issuer -- notes the suffix rule misses
+(ADAMI, ADAML beside ADAM) and notes filed under the issuing bank's name
+(GDXD as "Bank of Montreal") -- and only the shortest symbol is kept. After
+ranking, a second share class of a company already ranked (GOOG behind
+GOOGL) is neither a pick nor a control: it is the same bet twice.
+
 Prices come from Alpha Vantage, one request per name, not from Yahoo's bulk
 download. Yahoo throttled the bulk download by silently dropping symbols,
 differently each run: the same 2025-09-02 momentum screen passed 630 names

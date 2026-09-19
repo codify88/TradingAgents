@@ -33,7 +33,7 @@ from tradingagents.mandates.tools.quality import annual_metrics, quality_screens
 from . import prices
 from .manifest import ScreenManifest, make_run_id
 from .throttle import DEFAULT_REQUESTS_PER_MINUTE, RateLimiter, with_retry
-from .universe import load_universe
+from .universe import company_key, load_universe
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,7 @@ def fundamental_exclusions(mandate: Mandate | None, symbol: str, as_of: str,
 # Deliberately one number per mandate, named in the manifest, so whatever bias
 # the ordering introduces is visible rather than buried in a composite score.
 
+ANOTHER_SHARE_CLASS = "another share class of a company already ranked higher"
 NO_ORDERING_VALUE = "no ordering value: the mandate's ranking signal cannot place this name"
 VALUE_ORDERING = "FCF yield percentile against the company's own ten-year history (high = cheap vs itself)"
 MOMENTUM_ORDERING = "12-month excess total return over SPY"
@@ -355,6 +356,19 @@ def _run_screen(
         key=lambda s: (-1e18 if math.isnan(ordering.get(s, float("nan"))) else ordering[s]),
         reverse=True,
     )
+    # One company, one slot: a second share class (GOOG behind GOOGL) is the
+    # same bet, so it is neither a pick nor a control once its sibling ranks.
+    names = {c.symbol: c.name for c in universe}
+    seen: set[str] = set()
+    one_class = []
+    for symbol in ranked:
+        key = company_key(names.get(symbol, symbol)) or symbol
+        if key in seen:
+            excluded[symbol] = [ANOTHER_SHARE_CLASS]
+            continue
+        seen.add(key)
+        one_class.append(symbol)
+    ranked = one_class
     chosen = ranked[:picks]
     # Drawn from the eligible names the ranking did *not* pick, so the two
     # groups are disjoint and the comparison is between "ranked highest" and

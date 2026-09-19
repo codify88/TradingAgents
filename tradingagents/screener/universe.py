@@ -48,6 +48,64 @@ _DERIVATIVE_NAME = re.compile(
 )
 
 
+# Pooled vehicles Alpha Vantage also files as "Stock": ETFs, exchange-traded
+# notes, leveraged and inverse products, closed-end funds and term trusts
+# ("TRADR 2X LONG CEG DAILY ETF", "MicroSectors Travel 3X Leveraged ETNs",
+# "BlackRock Science and Technology Term Trust"). A mandate is written about
+# an operating business. REITs and royalty trusts ("... Realty Trust") are
+# common shares and must not match: only a *term* trust or a name *ending* in
+# Fund does.
+_POOLED_NAME = re.compile(
+    r"\bETFs?\b|\bETNs?\b|\bleveraged\b|\binverse\b|\b\d+(\.\d+)?x\s+(long|short)\b"
+    r"|\bterm\s+trust\b|\bfund\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def pooled_vehicle(name: str) -> bool:
+    """Whether the filed name is an ETF, note, leveraged product or fund, not a company."""
+    return bool(_POOLED_NAME.search(name.strip()))
+
+
+_SHARE_CLASS = re.compile(r"\s*[-,]?\s*\bclass\s+[a-z]\b.*$", re.IGNORECASE)
+
+
+def company_key(name: str) -> str:
+    """The company a listing belongs to, with any share-class suffix removed.
+
+    "Alphabet Inc - Class A" and "Alphabet Inc - Class C" are one company: a
+    screen that picks both has spent a slot on the same bet twice.
+    """
+    return _SHARE_CLASS.sub("", name).strip().lower()
+
+
+def one_line_per_issuer(candidates: list[Candidate]) -> list[Candidate]:
+    """Resolve symbols and names that appear more than once on the listing date.
+
+    - One symbol listed twice under the same name (OKE, TTE) is one company:
+      keep one row. Under *different* names it is a reused ticker (DFNS was
+      both IronNet and T3 Defense): its price history cannot be attributed to
+      either, so neither is kept.
+    - One name filed under several symbols is several lines of one issuer:
+      the notes and preferreds whose suffix the structural rule misses (ADAM,
+      ADAMI, ADAML) and the exchange-traded notes filed under the issuing
+      bank's name (GDXD as "Bank of Montreal"). Keep the shortest symbol --
+      the common shares -- and drop the rest.
+    """
+    by_symbol: dict[str, list[Candidate]] = {}
+    for c in candidates:
+        by_symbol.setdefault(c.symbol, []).append(c)
+    unique = []
+    for rows in by_symbol.values():
+        if len({r.name.strip().lower() for r in rows}) == 1:
+            unique.append(min(rows, key=lambda r: r.ipo_date))
+    by_name: dict[str, list[Candidate]] = {}
+    for c in unique:
+        by_name.setdefault(c.name.strip().lower(), []).append(c)
+    kept = [min(rows, key=lambda r: (len(r.symbol), r.symbol)) for rows in by_name.values()]
+    return sorted(kept, key=lambda c: c.symbol)
+
+
 def derivative_line(symbol: str, name: str, listed: set[str]) -> str | None:
     """Why ``symbol`` is a warrant, right, unit, note or preferred -- or None.
 
@@ -152,6 +210,8 @@ def load_universe(
         # cost a price download only to be dropped as "no price history".
         if derivative_line(row.get("symbol", ""), row.get("name", ""), listed_symbols):
             continue
+        if pooled_vehicle(row.get("name", "")):
+            continue
         ipo = row.get("ipoDate") or ""
         try:
             listed = pd.Timestamp(ipo)
@@ -171,5 +231,5 @@ def load_universe(
             delisted_since=active_now is not None and row["symbol"] not in active_now,
         ))
 
-    out.sort(key=lambda c: c.symbol)
+    out = one_line_per_issuer(out)
     return out[:limit] if limit else out

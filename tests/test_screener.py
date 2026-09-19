@@ -616,3 +616,91 @@ def test_an_empty_price_history_reads_as_empty_not_as_a_type_error(monkeypatch):
 
     monkeypatch.setattr(fin, "_price_history", lambda s, a, b: pd.Series(dtype=float))
     assert fin.price_history("X", pd.Timestamp("2013-01-01"), pd.Timestamp("2023-09-01")).empty
+
+
+# --- one company, one line --------------------------------------------------------------
+
+
+class TestUniverseHygiene:
+    """What the 2023-2026 screens turned up in Alpha Vantage's "Stock" listings."""
+
+    @pytest.mark.parametrize("name", [
+        "TRADR 2X LONG CEG DAILY ETF ", "MicroSectors Travel 3X Leveraged ETNs",
+        "BlackRock Science and Technology Term Trust", "DoubleLine Yield Opportunities Fund",
+        "AB CALIFORNIA INTERMEDIATE MUNICIPAL ETF ", "Some -3x Inverse Gold Miners Product",
+    ])
+    def test_pooled_vehicles_are_not_companies(self, name):
+        assert universe.pooled_vehicle(name)
+
+    @pytest.mark.parametrize("name", [
+        "Digital Realty Trust Inc", "Cross Timbers Royalty Trust", "Community Trust Bancorp Inc",
+        "Build A Bear Workshop Inc", "Daily Journal Corporation", "BigBear.ai Holdings Inc",
+        "Blackstone Mortgage Trust Inc - Class A", "Fundamental Global Inc",
+    ])
+    def test_operating_companies_and_reits_are_kept(self, name):
+        assert not universe.pooled_vehicle(name)
+
+    def _c(self, symbol, name, ipo="2010-01-01"):
+        return universe.Candidate(symbol, name, "NYSE", ipo)
+
+    def test_a_symbol_listed_twice_as_one_company_is_kept_once(self):
+        kept = universe.one_line_per_issuer([self._c("OKE", "Oneok Inc"), self._c("OKE", "Oneok Inc")])
+        assert [c.symbol for c in kept] == ["OKE"]
+
+    def test_a_reused_ticker_is_dropped(self):
+        """DFNS was IronNet and T3 Defense on the same listing date: whose prices?"""
+        kept = universe.one_line_per_issuer([
+            self._c("DFNS", "IronNet Inc - Class A", "2020-03-23"),
+            self._c("DFNS", "T3 Defense Inc - New", "2023-12-26"),
+            self._c("KO", "Coca-Cola Co"),
+        ])
+        assert [c.symbol for c in kept] == ["KO"]
+
+    def test_several_symbols_under_one_name_keep_the_common_shares(self):
+        kept = universe.one_line_per_issuer([
+            self._c("ADAM", "Adamas Trust Inc"), self._c("ADAMI", "Adamas Trust Inc"),
+            self._c("ADAML", "Adamas Trust Inc"),
+            self._c("BMO", "Bank of Montreal"), self._c("GDXD", "Bank of Montreal"),
+        ])
+        assert [c.symbol for c in kept] == ["ADAM", "BMO"]
+
+    def test_load_universe_applies_both_filters(self):
+        listing = (
+            "symbol,name,exchange,assetType,ipoDate,delistingDate,status\n"
+            "KO,Coca-Cola Co,NYSE,Stock,1990-01-01,null,Active\n"
+            "CEGX,TRADR 2X LONG CEG DAILY ETF ,NASDAQ,Stock,2020-01-01,null,Active\n"
+            "DFNS,IronNet Inc - Class A,NYSE,Stock,2020-03-23,null,Active\n"
+            "DFNS,T3 Defense Inc - New,NASDAQ,Stock,2020-12-26,null,Active\n"
+            "BMO,Bank of Montreal,NYSE,Stock,1994-01-01,null,Active\n"
+            "GDXD,Bank of Montreal,NYSE,Stock,2020-12-03,null,Active\n"
+        )
+        with patch.object(universe, "_make_api_request", return_value=listing):
+            symbols = [c.symbol for c in universe.load_universe("2026-09-17")]
+        assert symbols == ["BMO", "KO"]
+
+    def test_share_classes_share_a_company_key(self):
+        assert universe.company_key("Alphabet Inc - Class A") == universe.company_key("Alphabet Inc - Class C")
+        assert universe.company_key("Fox Corporation - Class A") == "fox corporation"
+        assert universe.company_key("Coca-Cola Co") == "coca-cola co"
+
+    def test_a_second_share_class_is_neither_pick_nor_control(self, monkeypatch):
+        names = {f"S{i:02d}": f"Company {i}" for i in range(12)}
+        names["S00"] = "Alphabet Inc - Class A"
+        names["S01"] = "Alphabet Inc - Class C"
+        frames = {s: _frame() for s in names}
+        frames["SPY"] = _frame()
+        monkeypatch.setattr(
+            screen, "load_universe",
+            lambda as_of, limit=None: [universe.Candidate(s, n, "NYSE", "2010-01-01")
+                                       for s, n in names.items()])
+        monkeypatch.setattr(
+            screen.prices, "download_av",
+            lambda syms, start, end, **kw: prices.PriceData(frames={s: frames[s] for s in syms if s in frames}))
+        monkeypatch.setattr(screen, "fundamental_exclusions", lambda *a, **k: ([], float("nan")))
+        order = {id(frames[s]): float(100 - i) for i, s in enumerate(names)}
+        monkeypatch.setattr(screen, "_momentum_ordering", lambda frame, bench: order.get(id(frame), 0.0))
+        result = screen.run_screen("equity_momentum", "2026-09-17", {"results_dir": "/tmp"},
+                                   picks=3, controls=3, control_seed=1, requests_per_minute=100_000)
+        chosen = result.manifest.pick_symbols + result.manifest.control_symbols
+        assert "S00" in result.manifest.pick_symbols and "S01" not in chosen
+        assert result.excluded["S01"] == [screen.ANOTHER_SHARE_CLASS]
