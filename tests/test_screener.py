@@ -579,3 +579,13 @@ class TestPriceHistoryCache:
         assert fin._price_history("ZZZ", "2023-01-01", "2023-09-01").empty
         assert list(fin._price_history("ZZZ", "2023-01-01", "2023-09-01")) == [10.0, 11.0]
         fin._price_history_cached.cache_clear()
+
+
+def test_an_empty_price_history_reads_as_empty_not_as_a_type_error(monkeypatch):
+    """The 2023-09-01 value rerun: 3 names failed ordering with "'<=' not
+    supported between numpy.ndarray and Timestamp" -- an empty answer, before
+    the retry could see it as one."""
+    from tradingagents.mandates.tools import financials as fin
+
+    monkeypatch.setattr(fin, "_price_history", lambda s, a, b: pd.Series(dtype=float))
+    assert fin.price_history("X", pd.Timestamp("2013-01-01"), pd.Timestamp("2023-09-01")).empty

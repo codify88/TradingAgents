@@ -271,6 +271,11 @@ def price_history(ticker: str, start: pd.Timestamp, as_of: pd.Timestamp) -> pd.S
     """Daily closes from ``start`` through ``as_of`` inclusive, never beyond it."""
     end = (as_of + pd.Timedelta(days=1)).strftime("%Y-%m-%d")  # yfinance end is exclusive
     series = _price_history(ticker.strip().upper(), start.strftime("%Y-%m-%d"), end)
+    if series.empty:
+        # No dates to filter: an empty series has an integer index, and comparing
+        # it with a Timestamp raises -- which is how a throttled Yahoo answer used
+        # to surface as a TypeError instead of as "no history".
+        return series
     return series[series.index <= as_of]
 
 
