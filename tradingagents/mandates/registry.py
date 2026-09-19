@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .base import Mandate
 from .equity_momentum import EQUITY_MOMENTUM
+from .equity_momentum_leaps import EQUITY_MOMENTUM_LEAPS
 from .equity_value import EQUITY_VALUE
 
 # Wire value used in saved configs, the CLI, and the checkpoint signature.
@@ -16,7 +17,7 @@ from .equity_value import EQUITY_VALUE
 NO_MANDATE = ""
 
 _MANDATES: dict[str, Mandate] = {
-    m.name: m for m in (EQUITY_VALUE, EQUITY_MOMENTUM)
+    m.name: m for m in (EQUITY_VALUE, EQUITY_MOMENTUM, EQUITY_MOMENTUM_LEAPS)
 }
 
 

@@ -218,6 +218,17 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
 # ---------------------------------------------------------------------------
 
 
+class Instrument(str, Enum):
+    """How a position is held, when a mandate offers more than the stock.
+
+    Only a LEAPS mandate asks for it (docs/design/leaps.md); everywhere else the
+    field is left unset and the decision renders exactly as upstream's.
+    """
+
+    STOCK = "Stock"
+    CALL = "Call"
+
+
 class PortfolioDecision(BaseModel):
     """Structured output produced by the Portfolio Manager.
 
@@ -258,6 +269,15 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Optional recommended holding period, e.g. '3-6 months'.",
     )
+    instrument: Instrument | None = Field(
+        default=None,
+        description=(
+            "Leave unset unless the mandate offers a LEAPS call. Then: Call to "
+            "hold the position through the contract in the LEAPS Analyst's "
+            "report, Stock to hold the shares. Only a Buy or Overweight can be "
+            "a Call."
+        ),
+    )
 
     @field_validator("price_target", mode="before")
     @classmethod
@@ -285,6 +305,10 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     target = decision.price_target if decision.price_target is not None else "not provided"
     parts.extend(["", f"**Price Target**: {target}"])
     parts.extend(["", f"**Time Horizon**: {decision.time_horizon or 'not provided'}"])
+    if decision.instrument is not None:
+        # Only a LEAPS mandate sets it, so every other decision renders exactly
+        # as it did before the field existed.
+        parts.extend(["", f"**Instrument**: {decision.instrument.value}"])
     return "\n".join(parts)
 
 

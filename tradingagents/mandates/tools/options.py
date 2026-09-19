@@ -27,7 +27,6 @@ from dataclasses import dataclass
 import pandas as pd
 
 from tradingagents.dataflows.alpha_vantage_common import _make_api_request
-from tradingagents.screener.throttle import with_retry
 
 # LEAPS are long-dated; the 2-year yield is the closest listed maturity.
 RATE_MATURITY = "2year"
@@ -138,6 +137,14 @@ def _num(value, cast=float):
         return cast(float(value))
     except (TypeError, ValueError):
         return cast(0)
+
+
+def with_retry(fn):
+    """The screener's rate-limit retry, imported late: tradingagents.screener
+    imports the mandates package, which imports this module."""
+    from tradingagents.screener.throttle import with_retry as retry
+
+    return retry(fn)
 
 
 def _parse_chain(payload, as_of: pd.Timestamp) -> list[Contract]:

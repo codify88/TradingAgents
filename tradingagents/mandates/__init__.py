@@ -6,11 +6,13 @@ upstream's ``asset_type``.
 
 from .base import TRADING_DAYS_PER_YEAR, Mandate, render_mandate_context
 from .equity_momentum import EQUITY_MOMENTUM
+from .equity_momentum_leaps import EQUITY_MOMENTUM_LEAPS
 from .equity_value import EQUITY_VALUE
 from .registry import NO_MANDATE, get_mandate, list_mandates
 
 __all__ = [
     "EQUITY_MOMENTUM",
+    "EQUITY_MOMENTUM_LEAPS",
     "EQUITY_VALUE",
     "NO_MANDATE",
     "TRADING_DAYS_PER_YEAR",

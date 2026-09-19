@@ -9,6 +9,7 @@ the numbers rather than producing them.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 import pandas as pd
@@ -149,3 +150,16 @@ def leaps_view(symbol: str, date: str, horizon_days: int, target_delta: float,
         contract=op.select_call(chain, s, date, r, q, horizon_days, target_delta),
         comparison=op.select_call(chain, s, date, r, q, horizon_days, comparison_delta),
     )
+
+
+_INSTRUMENT_LINE = re.compile(r"\*\*Instrument\*\*:\s*\**\s*(Call|Stock)\b", re.IGNORECASE)
+
+
+def decision_instrument(decision_text: str) -> str | None:
+    """"Call" or "Stock" from a rendered Portfolio Manager decision, or None.
+
+    None means the decision was made under a mandate that offers no call, not
+    that the stock was chosen -- grading must not count it either way.
+    """
+    m = _INSTRUMENT_LINE.search(decision_text or "")
+    return m.group(1).capitalize() if m else None

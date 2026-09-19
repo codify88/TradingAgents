@@ -35,7 +35,7 @@ def test_absent_mandate_resolves_to_none(empty):
 
 
 def test_registered_mandates_are_discoverable():
-    assert {m.name for m in list_mandates()} == {"equity_value", "equity_momentum"}
+    assert {m.name for m in list_mandates()} == {"equity_value", "equity_momentum", "equity_momentum_leaps"}
 
 
 # --- horizons -------------------------------------------------------------
