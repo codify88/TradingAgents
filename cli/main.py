@@ -1723,5 +1723,24 @@ def screen_review(
     console.print(Markdown(render_performance(DEFAULT_CONFIG, mandate)))
 
 
+@app.command(name="leaps-review")
+def leaps_review(
+    run_id: str = typer.Argument(..., help="The backtest run id whose decisions to grade"),
+    horizon: int = typer.Option(126, "--horizon", help="Trading days each call is held"),
+):
+    """Grade the instrument: would the LEAPS rule's call have beaten the stock?"""
+    from pathlib import Path
+
+    from tradingagents.agents.utils.memory import TradingMemoryLog
+    from tradingagents.mandates.tools import leaps_grading as lg
+
+    log = Path(DEFAULT_CONFIG["results_dir"]) / "backtest" / run_id / "trading_memory.md"
+    if not log.exists():
+        console.print(f"[red]No backtest log for run {run_id!r} at {log}[/red]")
+        raise typer.Exit(1)
+    entries = TradingMemoryLog({"memory_log_path": str(log)}).load_entries()
+    console.print(Markdown(lg.render(lg.review(entries, horizon_days=horizon))))
+
+
 if __name__ == "__main__":
     app()
