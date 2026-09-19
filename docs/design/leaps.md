@@ -77,7 +77,7 @@ return multiple per 1% move).
 |---|---|---|
 | Illiquid | Spread above 10% of mid, or open interest under 100 | The round trip eats the edge |
 | Expensive volatility | Our IV above 1.3x 1-year realised volatility | You are paying for moves the stock has not been making |
-| Time value too costly | Break-even move by the horizon exceeds the thesis's own expected move | The call loses even if the stock thesis is right |
+| Time value too costly | Break-even move by the exit (bought at the ask, sold at the bid) exceeds a half-sigma move at the contract's own IV | The stock must rally hard just to return the premium |
 | No expiry long enough | Nothing listed at horizon + 63 trading days | Would force a roll, which v1 does not model |
 
 Thresholds are starting points to be set by backtest, not fitted to it.
