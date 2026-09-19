@@ -58,6 +58,9 @@ class GrowthTrajectory:
     share_count: pd.Series
     fcf: pd.Series
     net_issuance: pd.Series       # equity + debt raised, per year
+    # Last four quarters' revenue against the four before: the growth rate a
+    # single quarter's timing (a delivery lull, a pulled-forward order) cannot move.
+    ttm_revenue_growth: float = float("nan")
 
     @property
     def revenue_acceleration(self) -> float:
@@ -78,6 +81,19 @@ class GrowthTrajectory:
         if len(g) < 5:
             return float("nan")
         return float((g.iloc[-1] - g.iloc[-5]) * 100)
+
+
+def _ttm_growth(quarterly: pd.Series) -> float:
+    """Trailing-four-quarter growth over the prior four, or NaN.
+
+    NaN without eight consecutive quarters or with a non-positive base, for
+    the same reason :func:`_yoy` drops those.
+    """
+    q = quarterly.dropna()
+    if len(q) < 8:
+        return float("nan")
+    current, prior = q.iloc[-4:].sum(), q.iloc[-8:-4].sum()
+    return float((current - prior) / prior) if prior > 0 else float("nan")
 
 
 def growth_trajectory(f) -> GrowthTrajectory:
@@ -110,6 +126,7 @@ def growth_trajectory(f) -> GrowthTrajectory:
             f.col("proceedsFromIssuanceOfCommonStock").fillna(0)
             + f.col("proceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet").fillna(0)
         ),
+        ttm_revenue_growth=_ttm_growth(q_revenue),
     )
 
 
@@ -238,12 +255,27 @@ def growth_screens(
         f"90-day consensus drift {_pct(drift)}",
     ))
 
-    weak = None if math.isnan(latest) else latest < MIN_REVENUE_GROWTH
+    # Judged on the trailing year, not one quarter: a single quarter below the
+    # floor (TSLA's -11.8% at 2025-09-02) can be timing, and tripping on it
+    # barred a name whose disqualifier the year had not yet shown. One weak
+    # reading of the two is a WATCH, so the analyst says which one to believe.
+    ttm = g.ttm_revenue_growth
+    readings = [x < MIN_REVENUE_GROWTH for x in (ttm, latest) if not math.isnan(x)]
+    if not readings:
+        status = "NO DATA"
+    elif math.isnan(ttm):
+        status = "WATCH" if readings[0] else "CLEAR"  # one quarter alone never trips
+    elif all(readings):
+        status = "TRIPPED"
+    elif any(readings):
+        status = "WATCH"
+    else:
+        status = "CLEAR"
     screens.append(Screen(
         "Not actually a growth business",
-        _status(weak),
-        f"latest quarterly revenue growth {_pct(latest)} against a "
-        f"{MIN_REVENUE_GROWTH * 100:.0f}% floor",
+        status,
+        f"trailing-four-quarter revenue growth {_pct(ttm)}, latest quarter {_pct(latest)}, "
+        f"against a {MIN_REVENUE_GROWTH * 100:.0f}% floor",
     ))
     return screens
 

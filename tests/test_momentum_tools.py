@@ -350,7 +350,7 @@ class TestEstimateRevisions:
 # --- fundamental screens ---------------------------------------------------
 
 
-def _traj(latest_growth, acceleration_pp):
+def _traj(latest_growth, acceleration_pp, ttm_growth=float("nan")):
     """A trajectory with a chosen latest quarterly growth and acceleration."""
     earlier = latest_growth - acceleration_pp / 100
     idx = pd.date_range("2024-03-31", periods=5, freq="QE")
@@ -362,6 +362,7 @@ def _traj(latest_growth, acceleration_pp):
         gross_margin=pd.Series(dtype=float), operating_margin=pd.Series(dtype=float),
         share_count=pd.Series(dtype=float), fcf=pd.Series(dtype=float),
         net_issuance=pd.Series(dtype=float),
+        ttm_revenue_growth=ttm_growth,
     )
 
 
@@ -403,8 +404,35 @@ class TestGrowthScreens:
         assert s["Price momentum and fundamental momentum point in opposite directions"].status == "NO DATA"
 
     def test_a_low_growth_business_is_not_a_growth_candidate(self):
-        s = _named(gr.growth_screens(_traj(0.01, 1.0), [], False, 0.1))
+        s = _named(gr.growth_screens(_traj(0.01, 1.0, ttm_growth=0.02), [], False, 0.1))
         assert s["Not actually a growth business"].status == "TRIPPED"
+
+    def test_one_weak_quarter_in_a_growing_year_is_a_watch(self):
+        """TSLA-shaped timing: the quarter is below the floor, the year is not."""
+        s = _named(gr.growth_screens(_traj(-0.118, -14.1, ttm_growth=0.08), [], False, 0.6))
+        assert s["Not actually a growth business"].status == "WATCH"
+
+    def test_one_strong_quarter_does_not_rescue_a_flat_year(self):
+        s = _named(gr.growth_screens(_traj(0.09, 5.0, ttm_growth=0.01), [], False, 0.1))
+        assert s["Not actually a growth business"].status == "WATCH"
+
+    def test_a_single_quarter_alone_never_trips(self):
+        s = _named(gr.growth_screens(_traj(0.01, 1.0), [], False, 0.1))
+        assert s["Not actually a growth business"].status == "WATCH"
+
+    def test_growth_on_both_readings_clears(self):
+        s = _named(gr.growth_screens(_traj(0.20, 1.0, ttm_growth=0.18), [], False, 0.1))
+        assert s["Not actually a growth business"].status == "CLEAR"
+
+
+class TestTrailingYearGrowth:
+    def test_trailing_four_quarters_against_the_four_before(self):
+        q = pd.Series([100.0] * 4 + [110.0] * 4, index=pd.date_range("2024-03-31", periods=8, freq="QE"))
+        assert gr._ttm_growth(q) == pytest.approx(0.10)
+
+    def test_needs_eight_quarters(self):
+        q = pd.Series([100.0] * 7, index=pd.date_range("2024-03-31", periods=7, freq="QE"))
+        assert math.isnan(gr._ttm_growth(q))
 
 
 # --- tool wrappers ---------------------------------------------------------
