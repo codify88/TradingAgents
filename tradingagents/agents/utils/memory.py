@@ -152,7 +152,8 @@ class TradingMemoryLog:
         ]
 
     def get_past_context(
-        self, ticker: str, n_same: int = 5, n_cross: int = 3, as_of: str | None = None
+        self, ticker: str, n_same: int = 5, n_cross: int = 3, as_of: str | None = None,
+        mandate: str | None = None,
     ) -> str:
         """Return formatted past context string for agent prompt injection.
 
@@ -162,6 +163,11 @@ class TradingMemoryLog:
         ``as_of``. This keeps a historical/backtest run from learning from
         outcomes that had not happened yet (#1251). ``as_of=None`` disables the
         filter, so live runs and pre-migration entries are unaffected.
+
+        When ``mandate`` is given (``""`` for an unmandated run), only lessons
+        written under that mandate are shown. A value lesson ("the drawdown was
+        an opportunity") taught to a momentum run on the same ticker is the
+        wrong lesson for its horizon. ``None`` disables the filter.
 
         A *pending* entry is included once it carries at least one interim
         review that has come due. Without this a long-horizon mandate teaches
@@ -174,6 +180,8 @@ class TradingMemoryLog:
         for e in self.load_entries():
             if e.get("superseded"):
                 continue  # retired by a later run; kept on disk, never taught
+            if mandate is not None and (e.get("mandate") or "") != mandate:
+                continue  # learned under another mandate's horizon and rules
             if not e.get("pending"):
                 if as_of is not None and not (
                     e.get("resolved") and e["resolved"] <= as_of
