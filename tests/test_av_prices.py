@@ -67,7 +67,9 @@ class TestDownloadAv:
         assert list(f.columns) == ["Open", "High", "Low", "Close", "Volume"]
         assert [d.strftime("%m-%d") for d in f.index] == ["06-07", "06-10"]
 
-    def test_a_vendor_error_is_unavailable_and_no_history_is_not(self):
+    def test_a_vendor_error_is_unavailable_and_no_history_is_not(self, monkeypatch):
+        monkeypatch.setattr(fin, "DAILY_JSON_RETRY_DELAYS", ())
+
         def answer(function, params):
             if params["symbol"] == "BAD":
                 raise RuntimeError("Invalid API call")
@@ -88,6 +90,24 @@ class TestDownloadAv:
             fin.alpha_vantage_daily_strict.cache_clear()
             b = prices.download_av(["X"], "2024-06-01", "2024-06-12").frames["X"]
         pd.testing.assert_frame_equal(a, b)
+
+
+class TestTransientErrorBody:
+    """EPRT, GLBS and VRT once came back as {"Error Message": "Invalid API
+    call"} mid-screen and were fine seconds later; believed at once, each was
+    excluded as "no price history" for the whole run."""
+
+    def test_a_one_off_error_body_is_retried(self, monkeypatch):
+        monkeypatch.setattr(fin, "DAILY_JSON_RETRY_DELAYS", (0.0, 0.0))
+        answers = iter(['{"Error Message": "Invalid API call"}', CSV])
+        with patch.object(fin, "_make_api_request", side_effect=lambda *a: next(answers)):
+            assert not fin.alpha_vantage_daily_strict("VRT").empty
+
+    def test_a_persistent_error_body_is_no_history(self, monkeypatch):
+        monkeypatch.setattr(fin, "DAILY_JSON_RETRY_DELAYS", (0.0, 0.0))
+        with patch.object(fin, "_make_api_request", return_value='{"Error Message": "x"}') as req:
+            assert fin.alpha_vantage_daily_strict("DEAD").empty
+        assert req.call_count == 1 + len(fin.DAILY_JSON_RETRY_DELAYS)
 
 
 class TestDiskCache:
@@ -124,7 +144,8 @@ class TestDiskCache:
             os.utime(path, (day_ago, day_ago))
             assert not fin.daily_is_cached("X")
 
-    def test_an_error_body_is_never_written(self, tmp_path):
+    def test_an_error_body_is_never_written(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(fin, "DAILY_JSON_RETRY_DELAYS", ())
         with fin.daily_disk_cache(tmp_path), \
                 patch.object(fin, "_make_api_request", return_value='{"Error Message": "x"}'):
             assert fin.alpha_vantage_daily_strict("X").empty

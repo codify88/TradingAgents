@@ -350,6 +350,8 @@ def overview(ticker: str) -> dict:
 # stub the vendor per symbol and must never read another test's answer back.
 _daily_cache_dir: Path | None = None
 DAILY_CACHE_KEEP_DAYS = 3
+# Waits before re-asking when a daily history comes back as a JSON error body.
+DAILY_JSON_RETRY_DELAYS = (2.0, 5.0)
 
 
 @contextlib.contextmanager
@@ -396,6 +398,19 @@ def _daily_csv(symbol: str):
         "TIME_SERIES_DAILY_ADJUSTED",
         {"symbol": symbol, "outputsize": "full", "datatype": "csv"},
     )
+    # A JSON body means "no such symbol" -- except when it does not: Alpha
+    # Vantage occasionally answers a valid symbol with {"Error Message":
+    # "Invalid API call"} (EPRT, GLBS and VRT once in a 5,250-name screen, all
+    # fine seconds later). Believed at once, that is a permanent exclusion for
+    # the run; a symbol that is really absent answers the same way every time.
+    for delay in DAILY_JSON_RETRY_DELAYS:
+        if not (isinstance(body, str) and body.lstrip().startswith("{")):
+            break
+        time.sleep(delay)
+        body = _make_api_request(
+            "TIME_SERIES_DAILY_ADJUSTED",
+            {"symbol": symbol, "outputsize": "full", "datatype": "csv"},
+        )
     if path is not None and isinstance(body, str) and body.startswith("timestamp,"):
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(gzip.compress(body.encode()))
