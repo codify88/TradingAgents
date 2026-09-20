@@ -15,10 +15,17 @@ EQUITY_VALUE = Mandate(
         "horizon is noise unless it changes what the business is worth."
     ),
     asset_class="equity",
-    # Two years primary, with interim checkpoints so the memory log still
-    # produces signal long before the thesis fully plays out.
-    horizon_days=504,
-    review_horizons_days=(63, 126, 252),
+    # Three years primary, with interim checkpoints so the memory log still
+    # produces signal long before the thesis plays out. Measured across nine
+    # screens (2019-2024), the shortlist's edge over its own random control
+    # compounds with the horizon -- +0.9% at six months, +2.5% at one year,
+    # +11.6% at two, +35.6% at three (positive in six of eight screens) -- so
+    # a two-year clock was grading the mandate before its thesis had run.
+    # Dispersion is wide and bear-market vintages carry much of it (buying COIN
+    # and META in 2022-09 alone is a +178% edge), which is the other reason the
+    # horizon is long: this style needs several vintages before it can be read.
+    horizon_days=756,
+    review_horizons_days=(126, 252, 504),
     # The Russell 1000 Value ETF, not SPY. Measured over 2023-09 to 2025-09,
     # SPY returned +47.6% and IWD +31.2%: against SPY every value decision
     # carries a 16-point style headwind, and conviction scoring reads

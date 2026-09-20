@@ -132,6 +132,38 @@ statements, too few to judge durability. Without the key the tools return an
 explicit `UNAVAILABLE` notice and the analysts are told to report the gap
 rather than fill it from memory.
 
+## What the horizon study showed (2026-09-20)
+
+Nine value screens (2019-09 to 2024-03, six picks and six random controls each,
+108 names) regraded from prices alone against IWD -- no agent runs, since the
+picks-vs-control comparison is a property of the screener:
+
+| Horizon | Mean edge | Median | Screens positive |
+|---|---|---|---|
+| 6 months | +0.9% | +1.7% | 5/9 |
+| 1 year | +2.5% | +3.0% | 5/9 |
+| 2 years | +11.6% | +7.4% | 5/9 |
+| 3 years | +35.6% | +26.9% | 6/8 |
+| 4 years | +36.6% | +17.3% | 4/6 |
+
+Hence 756 days. Two cautions: the dispersion is wide (2022-09 alone is a +178%
+edge, from buying COIN down 75% and META down 57%; 2021-09 is -47%), and the
+median pick beats the median control by a much smaller margin (+0.5% against
+-13.8% at three years) than the mean suggests.
+
+The same study killed a proposed "falling knife" guard. On the two 2023-2024
+screens, names already falling at entry had lost 45% on average and the guard
+looked compelling; across all nine screens the effect reverses -- falling names
+beat rising ones by 19 points at three years and 30 at four -- and the guard
+would have excluded the two best picks in the sample. A finding from one
+regime is a hypothesis, not a rule.
+
+Momentum's 126 days was tested the same way on its three screens: the
+picks-vs-control edge is +4.3% at one month, +27.5% at three, +7.6% at six,
+-0.7% at nine and +1.1% at twelve. It decays where the factor literature says
+it should, so the horizon stands; three months is a candidate to re-test once
+more screens grade.
+
 ## Design rules
 
 1. **Compute in Python, interpret in the LLM.** Every ratio, return, and

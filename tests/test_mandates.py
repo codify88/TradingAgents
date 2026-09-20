@@ -767,3 +767,12 @@ def test_momentum_is_graded_against_the_momentum_factor():
     the difference is the factor's run, not the analysts' picks."""
     assert EQUITY_MOMENTUM.benchmark == "MTUM"
     assert EQUITY_MOMENTUM_LEAPS.benchmark == "MTUM"  # the overlay inherits it
+
+
+def test_value_is_judged_over_three_years_with_checkpoints_along_the_way():
+    """Nine screens, 2019-2024: the shortlist's edge over its own control was
+    +0.9% at six months, +2.5% at one year, +11.6% at two and +35.6% at three.
+    A shorter clock grades this mandate before its thesis has run."""
+    assert EQUITY_VALUE.horizon_days == 756
+    assert EQUITY_VALUE.review_horizons_days == (126, 252, 504)
+    assert EQUITY_VALUE.horizon_days > EQUITY_MOMENTUM.horizon_days * 3
