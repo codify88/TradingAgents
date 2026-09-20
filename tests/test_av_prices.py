@@ -3,6 +3,7 @@ closes for market caps, and a same-day disk cache that is off unless asked for."
 
 from __future__ import annotations
 
+import datetime
 import os
 import time
 from unittest.mock import patch
@@ -148,6 +149,18 @@ class TestDiskCache:
                 data = prices.download_av(["X"], "2024-06-01", "2024-06-12", limiter=Limiter())
         assert "X" in data.frames
         assert Limiter.calls == 0
+
+    def test_freshness_is_judged_in_local_time(self, tmp_path):
+        """An mtime read as UTC against a local "today" is a day out every
+        evening: after 20:00 in New York a file just written read as stale."""
+        with fin.daily_disk_cache(tmp_path):
+            with patch.object(fin, "_make_api_request", return_value=CSV):
+                fin.alpha_vantage_daily_strict("X")
+            path = tmp_path / "av_daily" / "X.csv.gz"
+            for hour in (0, 9, 21, 23):
+                when = datetime.datetime.combine(datetime.date.today(), datetime.time(hour)).timestamp()
+                os.utime(path, (when, when))
+                assert fin.daily_is_cached("X"), hour
 
     def test_yesterdays_copy_is_refetched(self, tmp_path):
         with fin.daily_disk_cache(tmp_path):

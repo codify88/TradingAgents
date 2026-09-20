@@ -18,6 +18,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
+
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.mandates.registry import serves
 
@@ -115,18 +117,54 @@ class GroupOutcome:
         return self.settled > 0
 
 
-def _alpha(entry: dict) -> float:
-    raw = entry.get("alpha")
-    if not raw:
+def _pct_field(value) -> float:
+    if not value:
         return float("nan")
     try:
-        return float(str(raw).strip().rstrip("%")) / 100
+        return float(str(value).strip().rstrip("%")) / 100
     except ValueError:
         return float("nan")
 
 
+def benchmark_return(symbol: str, date: str, holding_days: int) -> float:
+    """Total return of ``symbol`` over ``holding_days`` trading days from ``date``.
+
+    Dividend-adjusted closes, the same series the grader measures a decision
+    against, so an alpha recomputed here is comparable to the logged one.
+    """
+    from tradingagents.mandates.tools.financials import alpha_vantage_daily_strict
+
+    frame = alpha_vantage_daily_strict(symbol)
+    if frame.empty:
+        return float("nan")
+    close = frame["Close"]
+    start = close.index.searchsorted(pd.Timestamp(date))
+    end = start + holding_days
+    if start >= len(close) or end >= len(close):
+        return float("nan")
+    return float(close.iloc[end] / close.iloc[start] - 1)
+
+
+def _alpha(entry: dict, benchmark: str | None = None) -> float:
+    """The logged alpha, or the decision's return against another benchmark.
+
+    ``benchmark`` regrades from what the log already stores -- the position's
+    own return and its holding period -- so a screen can be scored against a
+    style index (IWD for value) without rerunning a single agent.
+    """
+    if not benchmark:
+        return _pct_field(entry.get("alpha"))
+    raw = _pct_field(entry.get("raw"))
+    holding = str(entry.get("holding") or "").rstrip("d")
+    if math.isnan(raw) or not holding.isdigit():
+        return float("nan")
+    bench = benchmark_return(benchmark, entry["date"], int(holding))
+    return float("nan") if math.isnan(bench) else raw - bench
+
+
 def _group(
     label: str, symbols: list[str], entries: list[dict], as_of: str, mandate: str = "",
+    benchmark: str | None = None,
 ) -> GroupOutcome:
     alphas, pending = [], 0
     for symbol in symbols:
@@ -144,7 +182,7 @@ def _group(
         if entry.get("pending"):
             pending += 1
             continue
-        value = _alpha(entry)
+        value = _alpha(entry, benchmark)
         if math.isnan(value):
             pending += 1
             continue
@@ -178,16 +216,22 @@ def decision_logs(config: dict) -> list[TradingMemoryLog]:
     return logs
 
 
-def score_manifest(manifest: ScreenManifest, *logs: TradingMemoryLog) -> tuple[GroupOutcome, GroupOutcome]:
+def score_manifest(manifest: ScreenManifest, *logs: TradingMemoryLog,
+                   benchmark: str | None = None) -> tuple[GroupOutcome, GroupOutcome]:
     entries = [e for log in logs for e in log.load_entries()]
     return (
-        _group("picks", manifest.pick_symbols, entries, manifest.as_of, manifest.mandate),
-        _group("control", manifest.control_symbols, entries, manifest.as_of, manifest.mandate),
+        _group("picks", manifest.pick_symbols, entries, manifest.as_of, manifest.mandate, benchmark),
+        _group("control", manifest.control_symbols, entries, manifest.as_of, manifest.mandate, benchmark),
     )
 
 
-def render_performance(config: dict, mandate: str | None = None) -> str:
-    """Picks against controls across every saved screen, once outcomes settle."""
+def render_performance(config: dict, mandate: str | None = None,
+                       benchmark: str | None = None) -> str:
+    """Picks against controls across every saved screen, once outcomes settle.
+
+    ``benchmark`` regrades every cell against another index (IWD for a value
+    screen, whose alpha against SPY mostly measures the style, not the picks).
+    """
     manifests = load_manifests(config, mandate)
     if not manifests:
         return "No screens have been run yet."
@@ -204,12 +248,15 @@ def render_performance(config: dict, mandate: str | None = None) -> str:
         "Screen ids are the time suffix of the manifest filename under "
         "`results_dir/screens/`.",
         "",
+        (f"Alpha is measured against {benchmark}." if benchmark else
+         "Alpha is measured against each mandate's own benchmark, as logged."),
+        "",
         "| Screen | Style | As of | Picks | Picks α | Control | Control α | Edge |",
         "|---|---|---|---|---|---|---|---|",
     ]
     totals = {"picks": [], "control": []}
     for manifest in manifests:
-        picks, control = score_manifest(manifest, *logs)
+        picks, control = score_manifest(manifest, *logs, benchmark=benchmark)
         edge = (
             _pct(picks.mean_alpha - control.mean_alpha)
             if picks.measurable and control.measurable else "—"

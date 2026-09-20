@@ -12,6 +12,7 @@ easier, not harder (docs/design/mandates.md, rule 3).
 from __future__ import annotations
 
 import contextlib
+import datetime
 import functools
 import gzip
 import json
@@ -383,10 +384,18 @@ def _cached_daily_path(symbol: str) -> Path | None:
 
 
 def daily_is_cached(symbol: str) -> bool:
-    """Whether today's history for ``symbol`` is already on disk (no request needed)."""
+    """Whether today's history for ``symbol`` is already on disk (no request needed).
+
+    Both dates are local: a file's mtime read as UTC and compared with a local
+    "today" is a day out for part of every evening -- after 20:00 in New York a
+    file written seconds ago looked like tomorrow's, and yesterday's looked
+    like today's.
+    """
     path = _cached_daily_path(symbol.strip().upper())
-    return bool(path and path.exists()
-                and pd.Timestamp(path.stat().st_mtime, unit="s").date() == pd.Timestamp.now().date())
+    if not (path and path.exists()):
+        return False
+    written = datetime.datetime.fromtimestamp(path.stat().st_mtime)
+    return written.date() == datetime.date.today()
 
 
 def _daily_csv(symbol: str):

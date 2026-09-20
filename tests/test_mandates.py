@@ -752,3 +752,10 @@ def test_a_superseded_entry_is_not_revived_by_settling_it(tmp_path):
     assert by_decision["WRONG"]["pending"] is True, "retired entry must stay unsettled"
     assert by_decision["WRONG"]["superseded"]
     assert by_decision["RIGHT"]["pending"] is False, "the live entry is the one that settles"
+
+
+def test_value_is_graded_against_the_value_style_not_the_market():
+    """Against SPY (+47.6% over 2023-09 to 2025-09 against IWD's +31.2%) a value
+    decision's alpha is mostly the style's headwind, not the analysts' work."""
+    assert EQUITY_VALUE.benchmark == "IWD"
+    assert EQUITY_MOMENTUM.benchmark is None  # still the config's default

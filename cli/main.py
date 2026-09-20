@@ -1723,11 +1723,16 @@ def screen_review(
     mandate: str = typer.Option(
         None, "--mandate", help="Limit to one mandate; omit for all."
     ),
+    benchmark: str = typer.Option(
+        None, "--benchmark",
+        help="Regrade every cell against this ticker instead of the logged "
+             "benchmark, e.g. IWD for a value screen. Costs no agent runs.",
+    ),
 ):
     """Show whether the screen's shortlists actually beat their controls."""
     from tradingagents.screener.review import render_performance
 
-    console.print(Markdown(render_performance(DEFAULT_CONFIG, mandate)))
+    console.print(Markdown(render_performance(DEFAULT_CONFIG, mandate, benchmark)))
 
 
 @app.command(name="leaps-review")

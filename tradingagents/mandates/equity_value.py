@@ -19,11 +19,14 @@ EQUITY_VALUE = Mandate(
     # produces signal long before the thesis fully plays out.
     horizon_days=504,
     review_horizons_days=(63, 126, 252),
-    # None -> config benchmark_map, which keeps upstream's per-exchange
-    # benchmarks (SPY for US, ^N225 for .T, ...). Set a style index such as
-    # IWD/VTV here instead to grade selection skill within the value factor
-    # rather than total value-add over the market.
-    benchmark=None,
+    # The Russell 1000 Value ETF, not SPY. Measured over 2023-09 to 2025-09,
+    # SPY returned +47.6% and IWD +31.2%: against SPY every value decision
+    # carries a 16-point style headwind, and conviction scoring reads
+    # value-versus-growth rather than the analysts' judgement. IWD is broad,
+    # long-lived and matches this mandate's large-cap, quality-screened pool.
+    # (A screen's picks-vs-control edge is unaffected either way: the same
+    # benchmark is subtracted from both groups.)
+    benchmark="IWD",
     thesis_frame=(
         "that the business will still be earning attractive returns on capital "
         "in ten years, why competitors cannot take those returns away, that "

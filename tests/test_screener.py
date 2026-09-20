@@ -14,9 +14,10 @@ import pytest
 
 from tradingagents.mandates import get_mandate
 from tradingagents.mandates.tools.quality import Screen
-from tradingagents.screener import manifest as mf, prices, screen, universe
+from tradingagents.screener import manifest as mf, prices, review as rv, screen, universe
 from tradingagents.screener.review import (
     GroupOutcome,
+    _alpha as review_alpha,
     render_performance,
     render_screen,
     score_manifest,
@@ -704,3 +705,41 @@ class TestUniverseHygiene:
         chosen = result.manifest.pick_symbols + result.manifest.control_symbols
         assert "S00" in result.manifest.pick_symbols and "S01" not in chosen
         assert result.excluded["S01"] == [screen.ANOTHER_SHARE_CLASS]
+
+
+class TestRegradingAgainstAnotherBenchmark:
+    """screen-review --benchmark: a value screen scored against IWD rather than
+    the logged SPY, from what the log already stores."""
+
+    def _entry(self, raw, alpha, holding="504d"):
+        return {"ticker": "AAA", "date": "2026-09-17", "rating": "Hold", "pending": False,
+                "raw": raw, "alpha": alpha, "holding": holding, "mandate": "equity_momentum",
+                "resolved": "2026-09-17", "superseded": None}
+
+    def test_the_logged_alpha_is_used_when_no_benchmark_is_given(self):
+        assert review_alpha(self._entry("+10.0%", "-5.0%")) == pytest.approx(-0.05)
+
+    def test_a_benchmark_regrades_from_the_positions_own_return(self):
+        with patch.object(rv, "benchmark_return", return_value=0.30) as bench:
+            assert review_alpha(self._entry("+10.0%", "-5.0%"), "IWD") == pytest.approx(-0.20)
+        bench.assert_called_once_with("IWD", "2026-09-17", 504)
+
+    def test_a_benchmark_without_prices_leaves_the_cell_unsettled(self):
+        with patch.object(rv, "benchmark_return", return_value=float("nan")):
+            assert math.isnan(review_alpha(self._entry("+10.0%", "-5.0%"), "IWD"))
+
+    def test_a_pending_cell_has_no_return_to_regrade(self):
+        entry = {**self._entry("+10.0%", "-5.0%"), "raw": None}
+        with patch.object(rv, "benchmark_return", return_value=0.30):
+            assert math.isnan(review_alpha(entry, "IWD"))
+
+    def test_benchmark_return_reads_adjusted_closes_over_the_holding_window(self):
+        import pandas as pd
+
+        idx = pd.bdate_range("2026-01-01", periods=300)
+        close = pd.Series(100.0, index=idx)
+        close.iloc[126:] = 110.0
+        frame = pd.DataFrame({"Close": close, "Raw Close": close})
+        with patch("tradingagents.mandates.tools.financials.alpha_vantage_daily_strict",
+                   return_value=frame):
+            assert rv.benchmark_return("IWD", "2026-01-01", 126) == pytest.approx(0.10)
