@@ -13,6 +13,7 @@ from tradingagents.graph.propagation import Propagator
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.mandates import (
     EQUITY_MOMENTUM,
+    EQUITY_MOMENTUM_LEAPS,
     EQUITY_VALUE,
     Mandate,
     get_mandate,
@@ -758,4 +759,11 @@ def test_value_is_graded_against_the_value_style_not_the_market():
     """Against SPY (+47.6% over 2023-09 to 2025-09 against IWD's +31.2%) a value
     decision's alpha is mostly the style's headwind, not the analysts' work."""
     assert EQUITY_VALUE.benchmark == "IWD"
-    assert EQUITY_MOMENTUM.benchmark is None  # still the config's default
+    assert EQUITY_VALUE.benchmark != EQUITY_MOMENTUM.benchmark  # each style, its own
+
+
+def test_momentum_is_graded_against_the_momentum_factor():
+    """Against SPY the screened picks read +18.5% alpha, against MTUM +10.3%:
+    the difference is the factor's run, not the analysts' picks."""
+    assert EQUITY_MOMENTUM.benchmark == "MTUM"
+    assert EQUITY_MOMENTUM_LEAPS.benchmark == "MTUM"  # the overlay inherits it

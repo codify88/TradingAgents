@@ -19,9 +19,13 @@ EQUITY_MOMENTUM = Mandate(
     # Classic 12-1 momentum holds 3-12 months; six months sits in the pocket.
     horizon_days=126,
     review_horizons_days=(21, 63),
-    # None -> config benchmark_map (see the note in equity_value). Set MTUM
-    # here to grade within the momentum factor instead of against the market.
-    benchmark=None,
+    # The momentum-factor ETF, not SPY, for the reason equity_value uses IWD:
+    # against the market a momentum decision's alpha is largely the factor's
+    # own run. Over the three screened windows the picks averaged +18.5% alpha
+    # against SPY and +10.3% against MTUM; the second number is the analysts'.
+    # (A screen's picks-vs-control edge is the same either way -- +7.6% here --
+    # because the benchmark cancels between the groups.)
+    benchmark="MTUM",
     agent_guidance={
         "trader": (
             "Use the Momentum Analyst's invalidation level as the stop-loss, state "
