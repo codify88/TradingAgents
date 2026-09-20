@@ -77,7 +77,7 @@ return multiple per 1% move).
 |---|---|---|
 | Illiquid | Spread above 10% of mid, or open interest under 100 | The round trip eats the edge |
 | Expensive volatility | Our IV above 1.3x 1-year realised volatility | You are paying for moves the stock has not been making |
-| Time value too costly | Break-even move by the exit (bought at the ask, sold at the bid) exceeds a half-sigma move at the contract's own IV | The stock must rally hard just to return the premium |
+| Time value too costly | Time value at the ask above 15% of the stock price; WATCH when it is under that but the break-even by the exit still exceeds a half-sigma move | Time value is what decays, and what it costs ranked -0.49 against the outcome across the first 21 graded cells |
 | No expiry long enough | Nothing listed at horizon + 63 trading days | Would force a roll, which v1 does not model |
 
 Thresholds are starting points to be set by backtest, not fitted to it.
@@ -119,3 +119,25 @@ stock more often than calls they rejected would have?
    and the conviction extension.
 5. A sweep on the momentum cells already run, so the instrument choice is
    graded against theses whose stock outcome is already known.
+
+## What the first graded cells showed (2026-09-20)
+
+21 call cells from three momentum screens plus the smoke test, each held 126
+trading days and sold at the bid, measured against a matched position of delta
+shares:
+
+- Mean edge -1.5%, median -6.1%; 3 of 21 positive. A 126-day hold of a
+  0.75-delta call costs roughly 6% of the stock price in time value and spread.
+- The mean is carried entirely by MU, whose stock rose 349% in one window
+  (+69% edge) and 133% in another (+16%). That is the convexity working: the
+  call cannot lose more than its premium and keeps paying above the strike.
+- Rank correlation against the edge: time value paid -0.49, implied volatility
+  -0.48, spread -0.21, break-even against the half-sigma bar +0.19. The
+  absolute premium is what matters; the ratio of implied to realised
+  volatility is not (+0.44, and mostly a proxy for low-volatility names).
+- Hence the 15% time-value ceiling. On these cells it bars 9 (which averaged
+  -5.8%) and keeps 12 (+1.7%). It also bars one of the two MU cells, which is
+  the honest cost of a rule that cannot see the future.
+- The agents' own instrument judgement showed no skill: the calls they chose
+  averaged -0.6% against matched shares (median -6.1%), the ones they passed
+  on -4.7%.

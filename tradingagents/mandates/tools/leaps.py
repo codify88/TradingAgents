@@ -28,6 +28,13 @@ REALISED_VOL_DAYS = 252
 # makes the call a long shot. A starting point for the backtest to set, not a
 # fitted value.
 BREAKEVEN_SIGMAS = 0.5
+# The premium's time value, as a share of the stock price, above which the call
+# is too dear to be the better instrument. Measured on the 21 graded call cells:
+# time value paid ranks -0.49 against the edge over matched shares -- the
+# strongest relationship in the set, and the one theory predicts, since that is
+# what decays. The cells above this line averaged -5.8% against matched shares,
+# those below +1.7%. Provisional at 21 cells, and to be re-set as more grade.
+MAX_TIME_VALUE_SHARE = 0.15
 
 
 def realised_vol(close: pd.Series, date: str, days: int = REALISED_VOL_DAYS) -> float:
@@ -122,11 +129,23 @@ def leaps_screens(v: LeapsView) -> list[Screen]:
     ))
 
     be, bar = v.breakeven(p), sigma_move(p.iv, v.horizon_days, BREAKEVEN_SIGMAS)
-    costly = None if math.isnan(be) or math.isnan(bar) else be > bar
+    share = p.extrinsic / p.underlying if p.underlying else float("nan")
+    if math.isnan(share):
+        status = "NO DATA"
+    elif share > MAX_TIME_VALUE_SHARE:
+        status = "TRIPPED"
+    elif not math.isnan(be) and not math.isnan(bar) and be > bar:
+        # Not dear in absolute terms but still needing an outsized move: the
+        # analyst says which reading it believes rather than the screen deciding.
+        status = "WATCH"
+    else:
+        status = "CLEAR"
     screens.append(Screen(
-        "Time value too costly", _status(costly),
-        f"break-even by the {v.horizon_days}-day exit needs {be:+.1%} from the stock, "
-        f"against a {BREAKEVEN_SIGMAS:g}-sigma move of {bar:+.1%} at the contract's own volatility",
+        "Time value too costly", status,
+        f"time value at the ask {share:.1%} of the stock price (ceiling "
+        f"{MAX_TIME_VALUE_SHARE:.0%}); break-even by the {v.horizon_days}-day exit needs "
+        f"{be:+.1%} from the stock, against a {BREAKEVEN_SIGMAS:g}-sigma move of {bar:+.1%} "
+        f"at the contract's own volatility",
     ))
     return screens
 

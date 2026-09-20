@@ -62,7 +62,10 @@ class TestScreens:
         assert (s.name, s.status) == ("No expiry long enough", "TRIPPED")
 
     def test_a_liquid_fairly_priced_call_clears(self):
-        s = _named(lp.leaps_screens(_view(_priced())))
+        """Deep in the money on a moderate-volatility name: little time value."""
+        deep = _priced(strike=70.0, bid=36.0, ask=36.5, vol=0.3)
+        assert deep.extrinsic / deep.underlying < lp.MAX_TIME_VALUE_SHARE
+        s = _named(lp.leaps_screens(_view(deep)))
         assert {x.status for x in s.values()} == {"CLEAR"}
 
     def test_thin_open_interest_is_illiquid(self):
@@ -78,11 +81,19 @@ class TestScreens:
         s = _named(lp.leaps_screens(_view(_priced(), realised=float("nan"))))
         assert s["Expensive volatility"].status == "NO DATA"
 
-    def test_a_break_even_beyond_half_a_sigma_is_too_costly(self):
-        """A far out-of-the-money call on a quiet stock: most of the premium is time value."""
-        p = _priced(strike=130.0, bid=0.95, ask=1.35, vol=0.12)
+    def test_a_dear_premium_is_too_costly(self):
+        """Time value above the ceiling: what ranked worst across the graded cells."""
+        p = _priced(strike=100.0, bid=19.0, ask=20.0, s=100.0, vol=0.6)
+        assert p.extrinsic / p.underlying > lp.MAX_TIME_VALUE_SHARE
         s = _named(lp.leaps_screens(_view(p, realised=p.iv)))
         assert s["Time value too costly"].status == "TRIPPED"
+
+    def test_a_cheap_premium_needing_an_outsized_move_is_a_watch(self):
+        """A far out-of-the-money call on a quiet stock: little paid, much needed."""
+        p = _priced(strike=130.0, bid=0.95, ask=1.35, vol=0.12)
+        assert p.extrinsic / p.underlying < lp.MAX_TIME_VALUE_SHARE
+        s = _named(lp.leaps_screens(_view(p, realised=p.iv)))
+        assert s["Time value too costly"].status == "WATCH"
 
 
 class TestTool:
