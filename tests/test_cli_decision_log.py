@@ -101,16 +101,6 @@ class _FakeGraph:
         yield {"messages": [], "final_trade_decision": "Rating: Buy\n\nBuy NVDA."}
 
 
-class _NullLive:
-    def __init__(self, *a, **k):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
 
 class _FakeBuffer:
     def __init__(self):
@@ -147,9 +137,9 @@ def test_cli_run_uses_the_decision_log_like_propagate(tmp_path, monkeypatch):
     fake = _FakeGraph()
     monkeypatch.setattr(m, "TradingAgentsGraph", lambda *a, **k: fake)
     monkeypatch.setattr(m, "message_buffer", _FakeBuffer())
-    monkeypatch.setattr(m, "create_layout", lambda: None)
-    monkeypatch.setattr(m, "update_display", lambda *a, **k: None)
-    monkeypatch.setattr(m, "Live", _NullLive)
+    # The run body is now handed to the TUI; run it straight through instead,
+    # so the test drives the real pipeline with no terminal involved.
+    monkeypatch.setattr(m, "run_live", lambda stream, *a, **k: stream())
     monkeypatch.setattr(m, "get_user_selections", lambda: {
         "ticker": "NVDA", "analysis_date": "2026-01-10",
         "analysts": [AnalystType.MARKET], "asset_type": "stock",

@@ -67,11 +67,19 @@ def test_the_state_log_keeps_non_ascii_readable(tmp_path):
 
 @pytest.mark.unit
 def test_the_live_display_does_not_scroll_the_terminal():
-    """A layout taller than the window makes rich redraw by scrolling, which
-    reads as flicker; the alternate screen holds it in place (#784). The final
-    report prints after the live view ends, so nothing is lost when it closes."""
+    """A view taller than the window that redraws by scrolling reads as flicker;
+    the alternate screen holds it in place (#784). The final report prints after
+    the live view ends, so nothing is lost when it closes.
+
+    The guarantee survived the move from rich's Live to Textual, but its marker
+    moved with it: Textual takes the alternate screen by default, and inline
+    mode is the one setting that would put the view back in the scrollback.
+    """
     import inspect
 
-    import cli.main as m
+    from textual.app import App
 
-    assert "screen=True" in inspect.getsource(m.run_analysis)
+    from cli.tui.live import LiveRunApp, run_live
+
+    assert issubclass(LiveRunApp, App)
+    assert "inline=True" not in inspect.getsource(run_live)

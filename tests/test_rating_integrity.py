@@ -146,11 +146,9 @@ def test_the_cli_says_when_a_run_produced_no_usable_rating(monkeypatch, tmp_path
     fake.graph = fake
     fake.propagator = fake
     monkeypatch.setattr(m, "TradingAgentsGraph", lambda *a, **k: fake)
-    monkeypatch.setattr(m, "create_layout", lambda: None)
-    monkeypatch.setattr(m, "update_display", lambda *a, **k: None)
-    monkeypatch.setattr(m, "Live", type("L", (), {"__init__": lambda s, *a, **k: None,
-                                                  "__enter__": lambda s: s,
-                                                  "__exit__": lambda s, *a: False}))
+    # The run body is now handed to the TUI; run it straight through instead,
+    # so the test drives the real pipeline with no terminal involved.
+    monkeypatch.setattr(m, "run_live", lambda stream, *a, **k: stream())
     monkeypatch.setattr(m.console, "print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
     monkeypatch.setattr(m, "display_complete_report", lambda *a, **k: None)
     monkeypatch.setattr(m.typer, "prompt", lambda *a, **k: "N")
