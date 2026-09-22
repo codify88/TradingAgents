@@ -93,3 +93,42 @@ def test_memory_as_of_gates_historical_but_not_live():
     assert g._memory_as_of(past) == past       # backtest -> filter on the trade date
     assert g._memory_as_of(today) is None      # live -> no filter
     assert g._memory_as_of(future) is None     # future-dated run -> no filter
+
+
+def _resolve_under(log, ticker, date, mandate, reflection):
+    log.store_decision(ticker, date, f"Rating: Buy\n{reflection}", mandate=mandate)
+    log.update_with_outcome(
+        ticker, date, 0.05, 0.02, 5, reflection, resolution_date="2026-01-10", mandate=mandate,
+    )
+
+
+@pytest.mark.unit
+def test_lessons_are_taught_only_under_the_mandate_that_learned_them(tmp_path):
+    """A value lesson ("the drawdown was an opportunity") is the wrong lesson for
+    a momentum run on the same ticker, and vice versa."""
+    log = _log(tmp_path)
+    _resolve_under(log, "KO", "2026-01-05", "equity_value", "value lesson")
+    _resolve_under(log, "KO", "2026-01-06", "equity_momentum", "momentum lesson")
+    _resolve_under(log, "KO", "2026-01-07", "", "upstream lesson")
+
+    momentum = log.get_past_context("KO", mandate="equity_momentum")
+    assert "momentum lesson" in momentum
+    assert "value lesson" not in momentum and "upstream lesson" not in momentum
+
+    upstream = log.get_past_context("KO", mandate="")
+    assert "upstream lesson" in upstream and "value lesson" not in upstream
+
+    # No filter: every lesson, as before.
+    everything = log.get_past_context("KO")
+    assert all(x in everything for x in ("value lesson", "momentum lesson", "upstream lesson"))
+
+
+@pytest.mark.unit
+def test_cross_ticker_lessons_are_filtered_by_mandate_too(tmp_path):
+    log = _log(tmp_path)
+    _resolve_under(log, "PEP", "2026-01-05", "equity_value", "pep value lesson")
+    _resolve_under(log, "NVDA", "2026-01-05", "equity_momentum", "nvda momentum lesson")
+
+    context = log.get_past_context("KO", mandate="equity_value")
+    assert "pep value lesson" in context
+    assert "nvda momentum lesson" not in context

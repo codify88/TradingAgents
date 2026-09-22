@@ -21,6 +21,7 @@ from tradingagents.agents import (
     create_trader,
 )
 from tradingagents.agents.utils.agent_states import AgentState
+from tradingagents.mandates.graph import add_mandate_analysts
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
@@ -59,7 +60,9 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
 
     def setup_graph(
-        self, selected_analysts=("market", "social", "news", "fundamentals")
+        self,
+        selected_analysts=("market", "social", "news", "fundamentals"),
+        mandate_analysts=(),
     ):
         """Set up and compile the agent workflow graph.
 
@@ -69,6 +72,9 @@ class GraphSetup:
                 - "social": Social media analyst
                 - "news": News analyst
                 - "fundamentals": Fundamentals analyst
+            mandate_analysts: Analysts the run's mandate adds (``Mandate.analysts``).
+                They run after the selected analysts and before the research
+                debate. Empty reproduces upstream's graph exactly.
         """
         plan = build_analyst_execution_plan(selected_analysts)
 
@@ -110,6 +116,12 @@ class GraphSetup:
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
+        # The node the last selected analyst hands to: the mandate's first
+        # analyst, or the research debate when the mandate adds none.
+        after_analysts = add_mandate_analysts(
+            workflow, mandate_analysts, self.quick_thinking_llm, next_node="Bull Researcher"
+        )
+
         # Define edges
         # Start with the first analyst
         workflow.add_edge(START, plan.specs[0].agent_node)
@@ -132,7 +144,7 @@ class GraphSetup:
             if i < len(plan.specs) - 1:
                 workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
             else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+                workflow.add_edge(current_clear, after_analysts)
 
         # Both research-debate edges share the complete DEBATE_PATH_MAP (#1088).
         for debate_node in ("Bull Researcher", "Bear Researcher"):

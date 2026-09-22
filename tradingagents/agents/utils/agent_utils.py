@@ -48,6 +48,8 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+from tradingagents.dataflows.utils import get_current_date  # noqa: E402
+
 
 def get_language_instruction() -> str:
     """Return a prompt instruction for the configured output language.
@@ -137,6 +139,7 @@ def build_instrument_context(
     ticker: str,
     asset_type: str = "stock",
     identity: Mapping[str, str] | None = None,
+    curr_date: str | None = None,
 ) -> str:
     """Describe the exact instrument so agents preserve identity and ticker.
 
@@ -144,6 +147,11 @@ def build_instrument_context(
     :func:`resolve_instrument_identity`), the company name and business
     classification are injected so agents anchor to the real company rather
     than pattern-matching the price chart to a wrong one (#814).
+
+    That profile carries no historical vintage: it describes the company today.
+    For a run dated earlier, the context says so, since a company that has since
+    renamed or been reclassified would otherwise anchor the whole graph to an
+    identity it did not have on the analysis date.
     """
     is_crypto = asset_type == "crypto"
     instrument_label = "asset" if is_crypto else "instrument"
@@ -174,6 +182,13 @@ def build_instrument_context(
             "Do not substitute a different company or ticker unless a tool "
             "result explicitly disproves this resolved identity."
         )
+        today = get_current_date()
+        if curr_date and str(curr_date) < today:
+            context += (
+                f" This identity is how the vendor describes the instrument today "
+                f"({today}), not necessarily on {curr_date}: a name or "
+                f"classification changed since then would read as the current one."
+            )
 
     if is_crypto:
         context += (
@@ -198,6 +213,157 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     return build_instrument_context(
         str(state["company_of_interest"]),
         state.get("asset_type", "stock"),
+    )
+
+
+def get_mandate_context_from_state(state: Mapping[str, Any]) -> str:
+    """Return the mandate prompt block for the current run, or ''.
+
+    Resolved once at run start (see ``TradingAgentsGraph._resolve_mandate``)
+    and stored on the state. Falls back to re-rendering from the stored wire
+    name, and finally to '' -- a state built without a mandate (bare
+    programmatic calls, upstream tests) must read exactly as it does upstream,
+    so callers can interpolate the result unconditionally.
+    """
+    context = state.get("mandate_context")
+    if isinstance(context, str) and context.strip():
+        return context
+
+    from tradingagents.mandates import get_mandate, render_mandate_context
+
+    name = state.get("mandate")
+    if not isinstance(name, str) or not name:
+        return ""
+    try:
+        return render_mandate_context(get_mandate(name))
+    except ValueError:
+        # An unknown name is caught loudly at run start; mid-graph, degrade to
+        # upstream behaviour rather than killing an in-flight run.
+        return ""
+
+
+def mandate_section(state: Mapping[str, Any], agent: str | None = None) -> str:
+    """The mandate block as a prompt section, blank-padded, or ''.
+
+    Lets an agent write ``{mandate_section}`` inline without leaving a stray
+    blank line when no mandate is set.
+
+    Carries the mandate analysts' reports too. Every downstream agent already
+    interpolates this section, so a mandate analyst's findings reach the
+    researchers, trader, risk debate and portfolio manager with no edit to
+    their prompts.
+
+    ``agent`` names the caller's role (see ``mandates.base.DOWNSTREAM_AGENTS``);
+    the mandate's guidance for that role, if any, closes the section.
+    """
+    context = get_mandate_context_from_state(state)
+    if not context:
+        return ""
+    from tradingagents.mandates.graph import render_mandate_reports
+
+    parts = [context]
+    reports = render_mandate_reports(state)
+    if reports:
+        parts.append(reports)
+    mandate = _mandate_of(state)
+    guidance = mandate.agent_guidance.get(agent or "", "") if mandate else ""
+    if guidance:
+        parts.append(f"MANDATE-SPECIFIC GUIDANCE for your role: {guidance}")
+    return "\n\n".join(parts) + "\n\n"
+
+
+def _mandate_of(state: Mapping[str, Any]):
+    """The run's Mandate object, or None when unset or unknown to this build."""
+    from tradingagents.mandates import get_mandate
+
+    try:
+        return get_mandate(state.get("mandate"))
+    except ValueError:
+        return None
+
+
+# The mandate analysts' citation discipline, extended to upstream's four under a
+# mandate. In the TSLA runs the upstream analysts invented an earnings date and
+# hand-computed returns that disagreed with the tools; a mandate's hard screens
+# and graded horizons make those errors cost more than they do upstream.
+MANDATE_EVIDENCE_RULES = (
+    "EVIDENCE RULES for this analysis: every figure you state must come from tool "
+    "output or data supplied in this run. Cite it; do not recompute returns, ratios or growth rates "
+    "yourself, and never supply a number, date or event from memory. A future date "
+    "(earnings, a launch, a deadline) may be stated only if a tool returned it. If "
+    "a figure you need was not returned, say it is unavailable."
+)
+
+
+def apply_mandate_to_system_message(
+    state: Mapping[str, Any], analyst_key: str, system_message: str
+) -> str:
+    """Frame an analyst's upstream system message with the run's mandate.
+
+    The mandate block goes first, so it frames everything that follows, and the
+    mandate's analyst-specific guidance goes last, where it takes precedence
+    over the generic upstream instructions it narrows. ``system_message`` is
+    returned untouched when no mandate is set, so an unmandated run is
+    byte-identical to upstream.
+
+    Wrapping the message this way -- rather than editing each analyst's prompt
+    template -- keeps upstream prompt changes merging cleanly.
+    """
+    if not isinstance(system_message, str):
+        # A stray trailing comma in an analyst's prompt makes this a 1-tuple,
+        # which the template then renders as Python tuple syntax -- quotes,
+        # parens, escaped newlines -- straight into the model's system prompt.
+        # Upstream shipped exactly that in the fundamentals analyst. Say so
+        # here rather than failing with a TypeError deep in a str join.
+        raise TypeError(
+            f"analyst {analyst_key!r} built a {type(system_message).__name__} "
+            f"system message, not a str -- check for a trailing comma in its "
+            f"prompt assignment"
+        )
+
+    context = get_mandate_context_from_state(state)
+    if not context:
+        return system_message
+
+    parts = [context, system_message, MANDATE_EVIDENCE_RULES]
+
+    mandate = _mandate_of(state)
+    guidance = mandate.guidance_for(analyst_key) if mandate else ""
+    if guidance:
+        parts.append(
+            f"MANDATE-SPECIFIC GUIDANCE for this analysis. Where it narrows the "
+            f"general instructions above, follow it:\n{guidance}"
+        )
+    return "\n\n".join(parts)
+
+def report_or_absent(text: str, source: str) -> str:
+    """An analyst's report, or a marker saying it was never produced.
+
+    A report is empty when its analyst was not selected, refused, or returned
+    nothing. Interpolating that into a labelled section presents an absence as a
+    blank finding, and the reading agent fills it in from nothing, the same way
+    an empty opponent argument used to invite an invented rebuttal (#1176).
+    """
+    text = (text or "").strip()
+    if text:
+        return text
+    return f"(No {source} report in this run: it is not available, not an empty finding.)"
+
+
+def get_portfolio_context_from_state(state: Mapping[str, Any]) -> str:
+    """Return the caller's portfolio block, or a notice that none was given.
+
+    A run without portfolio context must not read as a flat book: the agents
+    would otherwise size as if the caller held nothing, which is a claim about
+    an account we were never told about.
+    """
+    context = state.get("portfolio_context")
+    if isinstance(context, str) and context.strip():
+        return context
+    return (
+        "Portfolio context: not provided. You do not know the caller's current "
+        "holdings or cash, so do not assume a flat book; give direction and "
+        "sizing guidance in terms the caller can apply to their own position."
     )
 
 

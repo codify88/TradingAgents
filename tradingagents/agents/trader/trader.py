@@ -10,6 +10,8 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_portfolio_context_from_state,
+    mandate_section,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -24,6 +26,7 @@ def create_trader(llm):
     def trader_node(state, name):
         company_name = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
+        mandate_context = mandate_section(state, "trader")
         investment_plan = state["investment_plan"]
         # The research plan digests the debate but loses exact price structure;
         # give the Trader the technical market report so entry/stop levels are
@@ -31,6 +34,7 @@ def create_trader(llm):
         # report is empty when the user did not select the market analyst, so
         # only offer it (and the grounding instruction) when it has content.
         market_report = (state["market_report"] or "").strip()
+        portfolio_context = get_portfolio_context_from_state(state)
 
         if market_report:
             grounding = (
@@ -64,11 +68,20 @@ def create_trader(llm):
             {
                 "role": "user",
                 "content": (
-                    f"Here is the research team's investment plan for {company_name}. "
+                    f"{mandate_context}Here is the research team's investment plan for {company_name}. "
                     f"{instrument_context}\n\n"
                     f"{report_section}"
+                    f"{portfolio_context}\n\n"
                     f"Proposed Investment Plan:\n{investment_plan}\n\n"
-                    f"Make an informed, strategic trading decision."
+                    "Make an informed, strategic trading decision.\n\n"
+                    "## Output\n\n"
+                    "Write these sections, in this order, starting with the action "
+                    "on its own line:\n\n"
+                    "- **Action**: exactly one of Buy / Hold / Sell. A research "
+                    "recommendation of Overweight is a Buy and Underweight is a Sell, "
+                    "sized by how strong the case is; conflict alone is not a Hold.\n"
+                    "- **Reasoning**: why, against the plan and the price structure\n"
+                    "- **Entry Price**, **Stop Loss**, **Position Sizing**: when you can state them"
                 ),
             },
         ]
