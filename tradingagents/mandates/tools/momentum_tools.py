@@ -13,7 +13,7 @@ from typing import Annotated
 import pandas as pd
 from langchain_core.tools import tool
 
-from . import growth as gr, momentum as mo
+from . import earnings as ec, growth as gr, momentum as mo
 from .financials import load_financials, ohlcv_history, overview
 from .render import (
     flag as _flag,
@@ -268,6 +268,53 @@ def _estimate_revisions_report(ticker: str, curr_date: str) -> str:
     ])
 
 
+# --- earnings calendar ------------------------------------------------------------
+
+
+@_guarded
+def _earnings_calendar_report(ticker: str, curr_date: str) -> str:
+    as_of = pd.Timestamp(curr_date)
+    nxt = ec.next_earnings(ticker, as_of)
+    if nxt is None:
+        return "\n\n".join([
+            f"## Next earnings: {ticker.upper()}",
+            "UNAVAILABLE: no scheduled report for this ticker within the calendar "
+            "window, or the run is dated too far back to be served today's "
+            "schedule. Say the catalyst date is unknown rather than assuming one: "
+            "a kill-check timed against a guessed date is worse than one timed "
+            "against none.",
+        ])
+
+    days = nxt.days_away(as_of)
+    soon = (
+        "inside the usual holding window for this mandate -- the thesis will be "
+        "tested before it matures" if days <= 60 else
+        "beyond the near term, so it bounds the thesis rather than testing it now"
+    )
+    return "\n\n".join([
+        f"## Next earnings: {ticker.upper()} as of {as_of.date()}",
+        _table(
+            ["Field", "Value"],
+            [
+                ["Report date", str(nxt.report_date.date())],
+                ["Days away", str(days)],
+                ["Fiscal period ending",
+                 str(nxt.fiscal_period_end.date()) if nxt.fiscal_period_end else "n/a"],
+                ["Consensus EPS estimate",
+                 f"{nxt.estimate} {nxt.currency}" if nxt.estimate is not None else "n/a"],
+            ],
+        ),
+        f"This is the date the thesis gets marked to reality: {soon}. Revision "
+        "breadth is what the street expects going in; this is when it is settled. "
+        "A position sized without reference to it is carrying an event it has not "
+        "priced.",
+        "The schedule is as published today, not as of the run date -- the vendor "
+        "stamps no as-of date on it, which is why a historical run is not served "
+        "one at all.",
+        _CITE,
+    ])
+
+
 # --- tool objects ---------------------------------------------------------------------
 
 
@@ -312,5 +359,15 @@ def get_estimate_revisions(
     return _estimate_revisions_report(ticker, curr_date)
 
 
+@tool
+def get_earnings_calendar(
+    ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
+) -> str:
+    """When this company next reports, how many days away that is, and the
+    consensus EPS estimate going in."""
+    return _earnings_calendar_report(ticker, curr_date)
+
+
 MOMENTUM_TOOLS = (get_relative_strength, get_trend_structure)
-GROWTH_TOOLS = (get_growth_trajectory, get_estimate_revisions)
+GROWTH_TOOLS = (get_growth_trajectory, get_estimate_revisions, get_earnings_calendar)

@@ -453,3 +453,94 @@ class TestToolSafety:
         for fn in (mt._relative_strength_report, mt._trend_structure_report,
                    mt._growth_trajectory_report, mt._estimate_revisions_report):
             assert hasattr(fn, "__wrapped__"), f"{fn.__name__} is not guarded"
+
+
+# --- earnings calendar -----------------------------------------------------
+
+CALENDAR_CSV = (
+    "symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay\n"
+    "KO,COCA-COLA COMPANY (THE),2099-10-20,2099-09-30,0.87,USD,\n"
+    "KO,COCA-COLA COMPANY (THE),2099-12-01,2099-11-30,0.91,USD,\n"
+    # A name with a comma in it: the reason this is parsed, not split.
+    '"CG","CARLYLE GROUP L.P., THE",2099-11-04,2099-09-30,1.10,USD,\n'
+    "NOEST,NO ESTIMATE CORP,2099-10-01,2099-09-30,,USD,\n"
+)
+
+
+def _calendar(monkeypatch):
+    from tradingagents.mandates.tools import earnings as ec
+
+    ec._calendar_csv.cache_clear()
+    monkeypatch.setattr(ec, "_make_api_request", lambda *a, **k: CALENDAR_CSV)
+    return ec
+
+
+class TestEarningsCalendar:
+    def test_a_company_name_containing_a_comma_does_not_shift_every_column(self, monkeypatch):
+        """Split on commas instead of parsing and the report date becomes part of
+        a company name -- silently, for every row after the first quoted one."""
+        ec = _calendar(monkeypatch)
+        entry = ec.load_calendar()["CG"][0]
+        assert entry.name == "CARLYLE GROUP L.P., THE"
+        assert str(entry.report_date.date()) == "2099-11-04"
+        assert entry.estimate == pytest.approx(1.10)
+
+    def test_the_next_report_is_the_soonest_one_at_or_after_the_date(self, monkeypatch):
+        ec = _calendar(monkeypatch)
+        nxt = ec.next_earnings("KO", pd.Timestamp.today().normalize())
+        assert str(nxt.report_date.date()) == "2099-10-20"
+
+    def test_a_report_already_past_is_not_the_next_one(self, monkeypatch):
+        """KO has two scheduled reports; standing after the first one, the next
+        is the second, not the one that has already happened."""
+        ec = _calendar(monkeypatch)
+        nxt = ec.next_earnings("KO", pd.Timestamp("2099-11-01"))
+        assert str(nxt.report_date.date()) == "2099-12-01"
+
+    def test_a_missing_estimate_is_none_not_zero(self, monkeypatch):
+        """Zero would read as 'the street expects break-even', which is a claim."""
+        ec = _calendar(monkeypatch)
+        assert ec.next_earnings("NOEST", pd.Timestamp.today().normalize()).estimate is None
+
+    def test_an_unknown_symbol_has_no_scheduled_report(self, monkeypatch):
+        ec = _calendar(monkeypatch)
+        assert ec.next_earnings("ZZZZ", pd.Timestamp.today().normalize()) is None
+
+    def test_a_historical_run_is_not_served_todays_schedule(self, monkeypatch):
+        """Same rule as the estimates: a backtest that knows the future earnings
+        calendar knows something the decision could not have."""
+        ec = _calendar(monkeypatch)
+        with patch.object(ec, "load_calendar") as loader:
+            assert ec.next_earnings("KO", pd.Timestamp("2019-09-03")) is None
+        loader.assert_not_called()
+
+    def test_days_away_counts_from_the_run_date(self, monkeypatch):
+        ec = _calendar(monkeypatch)
+        entry = ec.load_calendar()["KO"][0]
+        assert entry.days_away(pd.Timestamp("2099-10-13")) == 7
+
+    def test_the_report_names_the_date_and_the_consensus(self, monkeypatch):
+        _calendar(monkeypatch)
+        from tradingagents.mandates.tools import momentum_tools as mt
+
+        out = mt._earnings_calendar_report("KO", str(pd.Timestamp.today().date()))
+        assert "2099-10-20" in out
+        assert "0.87 USD" in out
+
+    def test_an_undated_catalyst_says_so_rather_than_guessing(self, monkeypatch):
+        _calendar(monkeypatch)
+        from tradingagents.mandates.tools import momentum_tools as mt
+
+        out = mt._earnings_calendar_report("ZZZZ", str(pd.Timestamp.today().date()))
+        assert out.startswith("## Next earnings")
+        assert "UNAVAILABLE" in out
+        assert "rather than assuming one" in out
+
+
+def test_the_growth_analyst_is_given_the_catalyst_and_told_to_use_it():
+    from tradingagents.mandates import get_mandate
+
+    analyst = get_mandate("equity_momentum").analyst("growth")
+    assert "get_earnings_calendar" in {t.name for t in analyst.tools}
+    assert "get_earnings_calendar" in analyst.system_message
+    assert "inside this mandate's holding window" in analyst.system_message

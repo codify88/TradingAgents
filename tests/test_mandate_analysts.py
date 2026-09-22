@@ -99,7 +99,9 @@ class TestDeclaration:
         reconcile that disagreement away before the debate hears it."""
         tools = {a.key: {t.name for t in a.tools} for a in EQUITY_MOMENTUM.analysts}
         assert tools["momentum"] == {"get_relative_strength", "get_trend_structure"}
-        assert tools["growth"] == {"get_growth_trajectory", "get_estimate_revisions"}
+        assert tools["growth"] == {
+            "get_growth_trajectory", "get_estimate_revisions", "get_earnings_calendar",
+        }
         assert not (tools["momentum"] & tools["growth"])
 
 
