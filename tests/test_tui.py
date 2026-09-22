@@ -307,3 +307,22 @@ class TestInterruptedRun:
         assert out.exists()
         written = {p.name for p in (tmp_path / "AAPL_partial").rglob("*.md")}
         assert "market.md" in written and "news.md" in written
+
+
+def test_a_finished_run_writes_its_reports_without_being_asked(tmp_path, monkeypatch):
+    """A run costs minutes and real money. Making the report tree conditional on
+    someone still being at the keyboard lost it: the decision log is written
+    during the run, so an unanswered prompt left a recorded decision with no
+    reports behind it. This is that gap, closed.
+    """
+    import cli.main as m
+
+    asked = []
+    monkeypatch.setattr(m.typer, "prompt", lambda *a, **k: asked.append(a) or "N")
+
+    state = {"market_report": "# Market\nbody", "final_trade_decision": "**Rating**: Buy"}
+    out = m.save_report_to_disk(state, "AAPL", tmp_path / "AAPL_now")
+
+    assert out.exists()
+    assert (tmp_path / "AAPL_now" / "1_analysts" / "market.md").exists()
+    assert asked == [], "saving must not depend on answering a prompt"

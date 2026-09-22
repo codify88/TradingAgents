@@ -743,3 +743,47 @@ class TestRegradingAgainstAnotherBenchmark:
         with patch("tradingagents.mandates.tools.financials.alpha_vantage_daily_strict",
                    return_value=frame):
             assert rv.benchmark_return("IWD", "2026-01-01", 126) == pytest.approx(0.10)
+
+
+class TestRunBudget:
+    """A full sweep of every saved screen is tens of hours and hundreds of
+    dollars of model time. Fine to work through deliberately; not fine to start
+    unattended without a bound."""
+
+    def _manifest(self, picks, controls):
+        return mf.ScreenManifest(
+            run_id="r1", mandate="equity_value", as_of="2026-09-17", created="now",
+            universe_size=100, tiers=[], ordering_signal="s",
+            picks=[{"symbol": s, "rank": i + 1, "value": 0.1} for i, s in enumerate(picks)],
+            controls=[{"symbol": s, "value": 0.0} for s in controls],
+            control_seed=1, eligible_count=len(picks) + len(controls),
+        )
+
+    def test_a_limit_caps_the_names_adjudicated(self, monkeypatch, tmp_path):
+        from tradingagents.screener import run as screen_run
+
+        manifest = self._manifest(["AAA", "BBB", "CCC"], ["DDD"])
+        monkeypatch.setattr(screen_run, "remaining", lambda *a, **k: ["AAA", "BBB", "CCC", "DDD"])
+        seen = {}
+        screen_run.run(
+            manifest, {"results_dir": str(tmp_path), "data_vendors": {}},
+            runner=lambda cells, dates, config, **kw: seen.update(cells=cells) or None,
+            limit=2,
+        )
+        assert seen["cells"] == ["AAA", "BBB"]
+
+    def test_without_a_limit_every_name_is_passed_and_the_sweep_skips_decided_ones(
+        self, monkeypatch, tmp_path
+    ):
+        """The resume story depends on this: the unlimited call hands over every
+        name and lets the sweep decide what is already done."""
+        from tradingagents.screener import run as screen_run
+
+        manifest = self._manifest(["AAA", "BBB"], ["CCC"])
+        monkeypatch.setattr(screen_run, "remaining", lambda *a, **k: ["BBB"])
+        seen = {}
+        screen_run.run(
+            manifest, {"results_dir": str(tmp_path), "data_vendors": {}},
+            runner=lambda cells, dates, config, **kw: seen.update(cells=cells) or None,
+        )
+        assert set(seen["cells"]) == {"AAA", "BBB", "CCC"}

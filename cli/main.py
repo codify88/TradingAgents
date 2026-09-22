@@ -1184,14 +1184,17 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, supersede: bool
         console.print("\n[yellow]Run stopped before it finished.[/yellow]\n")
         partial = {k: v for k, v in message_buffer.report_sections.items() if v}
         if partial:
-            console.print(
-                f"[dim]{len(partial)} report(s) completed before the stop.[/dim]"
-            )
-            if typer.prompt("Save what completed?", default="Y").strip().upper() in ("Y", "YES", ""):
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                path = (Path(config["results_dir"]) / "reports"
-                        / f"{safe_ticker_component(selections['ticker'])}_{timestamp}_partial")
-                console.print(f"[green]Saved to {save_report_to_disk(partial, selections['ticker'], path)}[/green]")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = (Path(config["results_dir"]) / "reports"
+                    / f"{safe_ticker_component(selections['ticker'])}_{timestamp}_partial")
+            try:
+                save_report_to_disk(partial, selections["ticker"], path)
+                console.print(
+                    f"[green]✓ Saved the {len(partial)} report(s) that completed:[/green] "
+                    f"{path.resolve()}"
+                )
+            except Exception as exc:
+                console.print(f"[red]Error saving partial report: {exc}[/red]")
         else:
             console.print("[dim]No reports had completed yet.[/dim]")
         return
@@ -1208,26 +1211,23 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, supersede: bool
         )
     console.print(f"[dim]{analyst_wall_time_tracker.format_summary()}[/dim]")
 
-    # Prompt to save report
-    save_choice = typer.prompt("Save report?", default="Y").strip().upper()
-    if save_choice in ("Y", "YES", ""):
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Under results_dir, not the working directory: in Docker the working
-        # directory is inside the container and the report goes with it, while
-        # results_dir is the mounted volume the rest of the run already writes to.
-        default_path = (Path(config["results_dir"]) / "reports"
-                        / f"{safe_ticker_component(selections['ticker'])}_{timestamp}")
-        save_path_str = typer.prompt(
-            "Save path (press Enter for default)",
-            default=str(default_path)
-        ).strip()
-        save_path = Path(save_path_str)
-        try:
-            report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
-            console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
-            console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
-        except Exception as e:
-            console.print(f"[red]Error saving report: {e}[/red]")
+    # Written before anything is asked. A run costs minutes and real money, and
+    # making the reports conditional on someone still being at the keyboard lost
+    # them: the decision log is written during the run, so an unanswered prompt
+    # left a recorded decision with no reports behind it.
+    # Under results_dir, not the working directory: in Docker the working
+    # directory is inside the container and the report goes with it, while
+    # results_dir is the mounted volume the rest of the run already writes to.
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_path = (Path(config["results_dir"]) / "reports"
+                 / f"{safe_ticker_component(selections['ticker'])}_{timestamp}")
+    try:
+        report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
+        console.print(f"[green]✓ Report saved to:[/green] {save_path.resolve()}")
+        console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+        console.print(f"  [dim]Reopen any time:[/dim] tradingagents report {save_path.name}")
+    except Exception as e:
+        console.print(f"[red]Error saving report: {e}[/red]")
 
     # Prompt to display full report
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
@@ -1434,15 +1434,15 @@ def _analyst_list(analysts: str | None) -> list[str] | None:
     return [a.strip().lower() for a in analysts.split(",") if a.strip()] if analysts else None
 
 
-def _run_screen_plan(plan, analysts: str | None) -> None:
-    """Adjudicate one screen's undecided names and report what happened."""
+def _run_screen_plan(plan, analysts: str | None, limit: int | None = None) -> int:
+    """Adjudicate one screen's undecided names; return how many were run."""
     from tradingagents.agents.utils.memory import TradingMemoryLog
     from tradingagents.screener import run as screen_run
 
     m = plan.manifest
     if not plan.todo:
         console.print(f"[green]Screen {m.run_id}: every name is already decided.[/green]")
-        return
+        return 0
     picks = [n for n in plan.todo if n in m.pick_symbols]
     controls = [n for n in plan.todo if n not in m.pick_symbols]
     console.print(
@@ -1452,7 +1452,7 @@ def _run_screen_plan(plan, analysts: str | None) -> None:
     )
     try:
         result = screen_run.run(m, DEFAULT_CONFIG, _analyst_list(analysts), runner=run_backtest,
-                                mandate=plan.mandate)
+                                mandate=plan.mandate, limit=limit)
     except Exception as exc:  # a missing key or an unknown analyst is a setup error
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from None
@@ -1464,6 +1464,7 @@ def _run_screen_plan(plan, analysts: str | None) -> None:
         "[dim]Decisions settle once the mandate's horizon has traded; "
         "`tradingagents screen-review` scores picks against the control then.[/dim]"
     )
+    return result.cells_run
 
 
 @app.command(name="screen-run")
@@ -1480,6 +1481,12 @@ def screen_run_command(
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would run and roughly how long, then stop."
+    ),
+    max_names: int = typer.Option(
+        None, "--max-names",
+        help="Stop after adjudicating this many names, across all screens. The rest "
+             "stay undecided and the next run continues from there. A full sweep is "
+             "tens of hours of model time, so a scheduled job wants a bound.",
     ),
     run_as: str = typer.Option(
         None, "--as",
@@ -1513,10 +1520,22 @@ def screen_run_command(
         for p in plans:
             console.print(f"{p.manifest.run_id}: {len(p.todo)} names ({', '.join(p.todo)}), "
                           f"about {p.minutes} minutes")
-        console.print(f"Total: about {sum(p.minutes for p in plans)} minutes.")
+        total = sum(p.minutes for p in plans)
+        console.print(f"Total: about {total} minutes.")
+        if max_names:
+            console.print(f"With --max-names {max_names}: about {max_names * 8} minutes this run.")
         return
+    budget = max_names
     for p in plans:
-        _run_screen_plan(p, analysts)
+        if budget is not None and budget <= 0:
+            console.print(
+                f"[dim]Stopped at the --max-names {max_names} budget; "
+                f"the rest stay undecided for the next run.[/dim]"
+            )
+            break
+        budget_ran = _run_screen_plan(p, analysts, limit=budget)
+        if budget is not None:
+            budget -= budget_ran
 
 
 @app.command(name="screen-review")

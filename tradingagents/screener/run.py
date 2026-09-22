@@ -119,19 +119,30 @@ def plan(manifest: ScreenManifest, config: dict, mandate: str | None = None) -> 
 
 
 def run(manifest: ScreenManifest, config: dict, selected_analysts=None, runner=None,
-        mandate: str | None = None):
+        mandate: str | None = None, limit: int | None = None):
     """Adjudicate a screen's picks and controls; returns the backtest result.
 
     Cells already decided are skipped by the sweep itself, so an interrupted
     run resumes by being run again.
+
+    ``limit`` caps how many undecided names this call adjudicates. A full sweep
+    of every saved screen is tens of hours and hundreds of dollars of model
+    time, which is fine to work through and not fine to start unattended
+    without a bound. The names left over are simply still undecided, so the
+    next call continues where this one stopped.
     """
     if runner is None:
         from tradingagents.backtest import run_backtest as runner
 
-    kwargs = {"mandate": effective_mandate(manifest, mandate), "run_id": sweep_id(manifest)}
+    run_as = effective_mandate(manifest, mandate)
+    # Only take the limited path when asked: the unlimited call passes every
+    # name and lets the sweep skip what is decided, which is the behaviour the
+    # resume story depends on.
+    cells = remaining(manifest, config, run_as)[:limit] if limit else names(manifest)
+    kwargs = {"mandate": run_as, "run_id": sweep_id(manifest)}
     if selected_analysts:
         kwargs["selected_analysts"] = list(selected_analysts)
-    return runner(names(manifest), [manifest.as_of], config_for(manifest, config), **kwargs)
+    return runner(cells, [manifest.as_of], config_for(manifest, config), **kwargs)
 
 
 def find(config: dict, screen_id: str) -> ScreenManifest:
