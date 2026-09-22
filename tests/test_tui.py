@@ -247,3 +247,63 @@ class TestLiveView:
                 await pilot.pause(0.4)
             assert isinstance(app.error, RuntimeError)
         asyncio.run(scenario())
+
+
+class TestInterruptedRun:
+    """Stopping a run must not lose the reports it already paid for.
+
+    The first Textual version returned None on interrupt and cli/main.py called
+    .get() on it, so stopping a run ended in an AttributeError -- past the point
+    where the decision was logged but before the prompt that writes the report
+    tree. The reports were produced, and then discarded on the way out.
+    """
+
+    def test_interrupting_is_reported_not_mistaken_for_completion(self):
+        from cli.main import MessageBuffer
+
+        buffer = MessageBuffer()
+        buffer.init_for_analysis(["market"], ())
+        running = threading.Event()
+
+        def stream(redraw):
+            buffer.update_report_section("market_report", "# Market\npartial")
+            running.wait(timeout=10)
+            return {"final_trade_decision": "Rating: Buy"}
+
+        async def scenario():
+            app = LiveRunApp(stream, buffer)
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause(0.4)
+                await pilot.press("ctrl+c")
+                await pilot.pause(0.4)
+            assert app.interrupted is True
+            assert app.result is None
+            assert app.error is None
+
+        asyncio.run(scenario())
+        running.set()
+
+    def test_a_completed_run_is_not_marked_interrupted(self):
+        from cli.main import MessageBuffer
+
+        buffer = MessageBuffer()
+        buffer.init_for_analysis(["market"], ())
+
+        async def scenario():
+            app = LiveRunApp(lambda redraw: {"ok": True}, buffer)
+            async with app.run_test(size=SIZE) as pilot:
+                await pilot.pause(0.5)
+            assert app.interrupted is False
+            assert app.result == {"ok": True}
+
+        asyncio.run(scenario())
+
+    def test_partial_reports_can_still_be_written(self, tmp_path):
+        """What the interrupt path offers to save."""
+        from cli.main import save_report_to_disk
+
+        partial = {"market_report": "# Market\nbody", "news_report": "# News\nbody"}
+        out = save_report_to_disk(partial, "AAPL", tmp_path / "AAPL_partial")
+        assert out.exists()
+        written = {p.name for p in (tmp_path / "AAPL_partial").rglob("*.md")}
+        assert "market.md" in written and "news.md" in written

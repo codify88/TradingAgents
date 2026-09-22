@@ -1177,6 +1177,25 @@ def run_analysis(checkpoint: bool | None = None, portfolio=None, supersede: bool
         start_time=start_time, subtitle=subtitle,
     )
 
+    if final_state is None:
+        # Stopped by the reader. The decision log is written during the run, so
+        # anything that finished is already recorded; what is not yet on disk is
+        # the report tree, and those reports cost real time and money to produce.
+        console.print("\n[yellow]Run stopped before it finished.[/yellow]\n")
+        partial = {k: v for k, v in message_buffer.report_sections.items() if v}
+        if partial:
+            console.print(
+                f"[dim]{len(partial)} report(s) completed before the stop.[/dim]"
+            )
+            if typer.prompt("Save what completed?", default="Y").strip().upper() in ("Y", "YES", ""):
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = (Path(config["results_dir"]) / "reports"
+                        / f"{safe_ticker_component(selections['ticker'])}_{timestamp}_partial")
+                console.print(f"[green]Saved to {save_report_to_disk(partial, selections['ticker'], path)}[/green]")
+        else:
+            console.print("[dim]No reports had completed yet.[/dim]")
+        return
+
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
 
     # A decision nobody can read is not a position. Say so here rather than

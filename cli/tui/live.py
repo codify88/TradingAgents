@@ -158,6 +158,10 @@ class LiveRunApp(App):
         self.sub_title = subtitle
         self.result = None
         self.error: BaseException | None = None
+        # Set when the reader stops the run rather than the run finishing. The
+        # caller needs to tell the two apart: an interrupted run has no final
+        # state, and treating it as a completed one crashes on the next line.
+        self.interrupted = False
         # Content seen at the last poll, so "latest" means most recently
         # *arrived* rather than last in display order -- the pipeline does not
         # finish sections in the order they are listed.
@@ -230,11 +234,18 @@ class LiveRunApp(App):
         self.pane.query_one("#report-scroll").scroll_end(animate=False)
 
     def action_interrupt(self) -> None:
+        self.interrupted = True
         self.exit()
 
 
 def run_live(stream_fn, buffer, stats_handler=None, start_time=None, subtitle=""):
-    """Drive a run under the live view; return whatever the stream returned."""
+    """Drive a run under the live view.
+
+    Returns the stream's result, or ``None`` when the reader stopped the run
+    before it finished. Callers must handle ``None``: an interrupted run has no
+    final state, and a seven-minute analysis is long enough that the partial
+    reports it did produce are worth keeping.
+    """
     app = LiveRunApp(stream_fn, buffer, stats_handler, start_time, subtitle)
     app.run()
     if app.error is not None:
