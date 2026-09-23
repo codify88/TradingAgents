@@ -196,6 +196,27 @@ def test_nothing_left_says_so(cli, config):
     assert "already decided" in _plain(result.output)
 
 
+def test_a_failed_cell_exits_non_zero_after_the_sweep_finishes(monkeypatch, config, tmp_path):
+    """The nightly job only sees the exit code: a night of failed cells exited 0."""
+    runs = []
+
+    def fake_run_backtest(tickers, dates, cfg, **kwargs):
+        runs.append(kwargs["run_id"])
+        return SimpleNamespace(log_path=tmp_path / "log.md", cells_run=len(tickers) - 1, skipped=0,
+                               failures=[(tickers[0], dates[0], "No OHLCV data available")],
+                               settlement_failures=[])
+
+    monkeypatch.setattr(m, "DEFAULT_CONFIG", config)
+    monkeypatch.setattr(m, "run_backtest", fake_run_backtest)
+    monkeypatch.setattr(m, "summarize", lambda log: SimpleNamespace(render=lambda: ""))
+    for n in (1, 2):
+        mf.save_manifest(_manifest(run_id=f"2022-03-01_equity_momentum_{n}"), config)
+    result = runner.invoke(m.app, ["screen-run", "--all"])
+    assert len(runs) == 2, "a failure does not stop the sweep"
+    assert result.exit_code == 2, result.output
+    assert "2 cell(s) failed" in _plain(result.output)
+
+
 def test_an_id_and_all_together_is_refused(cli):
     result = runner.invoke(m.app, ["screen-run", "101500", "--all"])
     assert result.exit_code == 1

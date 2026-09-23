@@ -354,3 +354,14 @@ class TestSnapshotFallback:
 
         with pytest.raises(NoMarketDataError):
             self._rows("yfinance")
+
+    def test_rows_that_all_postdate_the_date_also_reach_the_fallback(self):
+        """No raise, just nothing on or before the date: still no data for this date."""
+        from tradingagents.dataflows import market_data_validator as mdv
+
+        cfg = {"data_vendors": {"core_stock_apis": "yfinance,alpha_vantage"}}
+        with patch.object(mdv, "load_ohlcv", return_value=pd.DataFrame()), \
+             patch("tradingagents.dataflows.config.get_config", return_value=cfg), \
+             patch.object(fin, "alpha_vantage_daily", return_value=self.FRAME):
+            rows = mdv._verified_rows("AAWW", "2022-06-01")
+        assert rows["Close"].iloc[-1] == 18.5

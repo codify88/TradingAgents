@@ -1434,15 +1434,17 @@ def _analyst_list(analysts: str | None) -> list[str] | None:
     return [a.strip().lower() for a in analysts.split(",") if a.strip()] if analysts else None
 
 
-def _run_screen_plan(plan, analysts: str | None, limit: int | None = None) -> int:
-    """Adjudicate one screen's undecided names; return how many were run."""
+def _run_screen_plan(
+    plan, analysts: str | None, limit: int | None = None
+) -> tuple[int, int]:
+    """Adjudicate one screen's undecided names; return (names run, cells failed)."""
     from tradingagents.agents.utils.memory import TradingMemoryLog
     from tradingagents.screener import run as screen_run
 
     m = plan.manifest
     if not plan.todo:
         console.print(f"[green]Screen {m.run_id}: every name is already decided.[/green]")
-        return 0
+        return 0, 0
     picks = [n for n in plan.todo if n in m.pick_symbols]
     controls = [n for n in plan.todo if n not in m.pick_symbols]
     console.print(
@@ -1464,7 +1466,7 @@ def _run_screen_plan(plan, analysts: str | None, limit: int | None = None) -> in
         "[dim]Decisions settle once the mandate's horizon has traded; "
         "`tradingagents screen-review` scores picks against the control then.[/dim]"
     )
-    return result.cells_run
+    return result.cells_run, len(result.failures)
 
 
 @app.command(name="screen-run")
@@ -1526,6 +1528,7 @@ def screen_run_command(
             console.print(f"With --max-names {max_names}: about {max_names * 8} minutes this run.")
         return
     budget = max_names
+    failed = 0
     for p in plans:
         if budget is not None and budget <= 0:
             console.print(
@@ -1533,9 +1536,16 @@ def screen_run_command(
                 f"the rest stay undecided for the next run.[/dim]"
             )
             break
-        budget_ran = _run_screen_plan(p, analysts, limit=budget)
+        budget_ran, plan_failed = _run_screen_plan(p, analysts, limit=budget)
+        failed += plan_failed
         if budget is not None:
             budget -= budget_ran
+    # A failed cell stays undecided and is retried next run, so the sweep itself
+    # carries on -- but a scheduled caller only sees the exit code, and a night
+    # where every cell failed must not read as a night where nothing went wrong.
+    if failed:
+        console.print(f"[yellow]{failed} cell(s) failed; see above.[/yellow]")
+        raise typer.Exit(code=2)
 
 
 @app.command(name="screen-review")

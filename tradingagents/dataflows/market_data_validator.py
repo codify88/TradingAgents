@@ -35,12 +35,18 @@ def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     """
     # As reported: this snapshot is quoted by the agents as exact prices, so a
     # gap-filled cell would put the previous session's number under this date.
+    # Yahoo can also answer with rows that all postdate curr_date -- a ticker
+    # reissued to a newer listing -- which is no data for this date just as
+    # surely as a raise, so both go to the fallback.
     try:
         data = load_ohlcv(symbol, curr_date, fill_gaps=False)
     except NoMarketDataError:
         data = _configured_fallback_rows(symbol)
         if data is None:
             raise
+    else:
+        if data is None or data.empty:
+            data = _configured_fallback_rows(symbol)
     if data is None or data.empty:
         raise ValueError(f"No OHLCV data available for {symbol}.")
 

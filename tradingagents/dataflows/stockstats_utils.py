@@ -28,6 +28,11 @@ MAX_OHLCV_STALE_DAYS = 10
 # at all (weekend, holiday) cannot trigger a download on every call.
 OHLCV_CACHE_TTL_SECONDS = 900
 
+# How much price history before the analysis date a load must cover. The
+# longest indicator the agents use is the 200-day SMA, so two years leaves it a
+# full year of warm-up before its first value is quoted.
+OHLCV_MIN_HISTORY_YEARS = 2
+
 
 def raise_for_empty(symbol: str, canonical: str, what: str) -> None:
     """Report an empty Yahoo result as an absence, or as an outage if it is one.
@@ -196,8 +201,10 @@ def _cache_is_fresh(data_file, curr_date_dt, now) -> bool:
 def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 5 years of data up to today and caches per symbol. On
-    subsequent calls the cache is reused. Rows after curr_date are
+    Downloads 5 years of data up to today and caches per symbol; an analysis
+    date too old for that window to hold OHLCV_MIN_HISTORY_YEARS before it
+    downloads from five years before its own year instead. On subsequent calls
+    the cache is reused. Rows after curr_date are
     filtered out so backtests never see future prices.
 
     ``fill_gaps`` carries prices forward over gaps so indicators compute on a
@@ -213,9 +220,17 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
     config = get_config()
     curr_date_dt = pd.to_datetime(curr_date).normalize()
 
-    # One cache file per symbol, holding the latest 5y-to-today download.
+    # One cache file per symbol, holding the latest 5y-to-today download. That
+    # window only serves dates recent enough to have OHLCV_MIN_HISTORY_YEARS of
+    # history inside it; an older analysis date would find a handful of rows,
+    # or none, before it. Those read a second file per symbol that starts five
+    # years before the analysis date's year, so dates in the same year share it.
     now = pd.Timestamp.today()
     start_date = now - pd.DateOffset(years=5)
+    suffix = ""
+    if curr_date_dt - pd.DateOffset(years=OHLCV_MIN_HISTORY_YEARS) < start_date:
+        start_date = pd.Timestamp(year=curr_date_dt.year - 5, month=1, day=1)
+        suffix = f"-from{start_date.year}"
     start_str = start_date.strftime("%Y-%m-%d")
     # yfinance ``end`` is EXCLUSIVE; request tomorrow so today's row is included
     # when curr_date is the current day (#986). Look-ahead is still prevented by
@@ -225,7 +240,7 @@ def load_ohlcv(symbol: str, curr_date: str, fill_gaps: bool = True) -> pd.DataFr
     os.makedirs(config["data_cache_dir"], exist_ok=True)
     data_file = os.path.join(
         config["data_cache_dir"],
-        f"{safe_symbol}-YFin-data.csv",
+        f"{safe_symbol}-YFin-data{suffix}.csv",
     )
 
     # A cached file may be empty if a prior fetch failed (unknown symbol,

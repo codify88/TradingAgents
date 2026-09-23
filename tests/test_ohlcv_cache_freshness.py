@@ -109,3 +109,61 @@ def test_one_cache_file_per_symbol_across_days(tmp_path, monkeypatch):
 
     assert len(downloads) == 3, "each new day refetches"
     assert [p.name for p in tmp_path.iterdir()] == ["AAPL-YFin-data.csv"]
+
+
+# --- the window reaches back far enough for the analysis date -----------------------------
+#
+# Live, a nightly screen-run failed every cell dated before September 2021: the
+# download was 5y back from *today*, so a 2019 analysis date had no rows at all
+# and a 2022 one had 110 -- no 200-day SMA.
+
+
+def _capture_downloads(tmp_path, monkeypatch):
+    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: NOW))
+    starts = []
+
+    def _download(*a, start, end, **k):
+        starts.append(start)
+        dates = pd.bdate_range(start, end, inclusive="left")
+        return pd.DataFrame({"Date": dates, "Close": 1.0}).set_index("Date")
+
+    monkeypatch.setattr(su.yf, "download", _download)
+    return starts
+
+
+@pytest.mark.unit
+def test_an_old_analysis_date_downloads_from_five_years_before_its_own_year(tmp_path, monkeypatch):
+    starts = _capture_downloads(tmp_path, monkeypatch)
+    out = su.load_ohlcv("PYPL", "2019-09-03")
+    assert starts == ["2014-01-01"]
+    assert out["Date"].min() <= pd.Timestamp("2017-09-03"), "two years of history before the date"
+    assert out["Date"].max() <= pd.Timestamp("2019-09-03"), "still no look-ahead"
+
+
+@pytest.mark.unit
+def test_a_date_near_the_windows_edge_also_gets_the_longer_history(tmp_path, monkeypatch):
+    """Within the 5y window but with too little of it before the date: META 2022-03-01."""
+    starts = _capture_downloads(tmp_path, monkeypatch)
+    su.load_ohlcv("META", "2022-03-01")
+    assert starts == ["2017-01-01"]
+
+
+@pytest.mark.unit
+def test_a_recent_date_keeps_the_shared_five_year_file(tmp_path, monkeypatch):
+    starts = _capture_downloads(tmp_path, monkeypatch)
+    su.load_ohlcv("AAPL", "2024-03-01")
+    assert starts == ["2021-07-18"]
+    assert [p.name for p in tmp_path.iterdir()] == ["AAPL-YFin-data.csv"]
+
+
+@pytest.mark.unit
+def test_old_dates_in_one_year_share_a_file_and_leave_the_recent_one_alone(tmp_path, monkeypatch):
+    starts = _capture_downloads(tmp_path, monkeypatch)
+    seeded = NOW.to_pydatetime().timestamp()  # local, see note above
+    for day in ("2019-03-01", "2019-09-03", "2024-03-01"):
+        su.load_ohlcv("PYPL", day)
+        for f in tmp_path.iterdir():
+            os.utime(f, (seeded, seeded))
+    assert starts == ["2014-01-01", "2021-07-18"], "the second 2019 date reuses the first's download"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["PYPL-YFin-data-from2014.csv", "PYPL-YFin-data.csv"]
