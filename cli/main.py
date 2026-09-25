@@ -1770,6 +1770,16 @@ def evaluate_command(
     console.print(Markdown(render(trial, comparisons, verdict)))
 
 
+@app.command(name="attribution")
+def attribution_command(
+    mandate: str = typer.Option(None, "--mandate", help="Limit to one mandate; omit for all."),
+):
+    """Where each screen's return came from: style, universe, selection, agents (prices only)."""
+    from tradingagents.evaluation.attribution import ladders, render
+
+    console.print(Markdown(render(ladders(DEFAULT_CONFIG, mandate))))
+
+
 @app.command(name="exit-study")
 def exit_study_command():
     """Replay every settled bullish call under trailing, tiered and volatility exits vs holding."""

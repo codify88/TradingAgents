@@ -63,6 +63,10 @@ def edge() -> str:
     split = market_split(config)
     if split:
         lines.append(split.sentence())
+    from tradingagents.evaluation.attribution import ladders, summary, summary_line
+
+    for mandate, s in summary(ladders(config)).items():
+        lines.append("Ladder, " + summary_line(mandate, s))
     for t in load_trials(config):
         if t.status != "active":
             continue
