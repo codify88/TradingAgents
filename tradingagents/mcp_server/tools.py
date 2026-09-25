@@ -13,7 +13,7 @@ Design: docs/design/hermes.md, part 1.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -182,6 +182,43 @@ def get_report(ticker: str, day: str) -> str:
     return out
 
 
+def recent_decisions(hours: int = 24) -> str:
+    """Decisions made in the last ``hours`` (by when they ran, not their analysis
+    date), with rating, from each sweep's usage log."""
+    cutoff = datetime.now().astimezone() - timedelta(hours=hours)
+    made = []
+    for usage in sorted((_results() / "backtest").glob("*/usage.jsonl")):
+        ratings = {(e["ticker"], e["date"]): e for e in TradingMemoryLog(
+            {"memory_log_path": str(usage.parent / "trading_memory.md")}).load_entries()}
+        for line in usage.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+                at = datetime.fromisoformat(row["at"])
+            except (ValueError, KeyError):
+                continue  # rows written before timestamps existed
+            if row.get("kind") != "cell" or at < cutoff:
+                continue
+            entry = ratings.get((row["ticker"], row["date"]))
+            made.append((at, row["ticker"], row["date"], row.get("status"),
+                         entry["rating"] if entry else "?", row.get("mandate") or "", usage.parent.name))
+    if not made:
+        return f"No decisions made in the last {hours} hours."
+    lines = [f"Decisions made in the last {hours} hours ({len(made)}):"]
+    for at, ticker, day, status, rating, mandate, run in sorted(made):
+        what = rating if status == "ok" else "FAILED"
+        lines.append(f"- {ticker} as of {day}: {what} [{mandate}] ({run}, {at:%H:%M})")
+    return "\n".join(lines)
+
+
+def morning_report() -> str:
+    """The 08:00 message: last night's run, what it decided, and reviews due this
+    week. Deterministic: no model writes it, so it cannot misreport."""
+    parts = [nightly_status(), recent_decisions(24), pending_reviews(7)]
+    text = "\n\n".join(parts)
+    # Telegram's limit is 4,096 characters per message.
+    return text if len(text) <= 3900 else text[:3900] + "\n[... cut; ask for details]"
+
+
 # -- screens and the store -------------------------------------------------------------
 
 
@@ -219,5 +256,5 @@ def data_store_stats(day: str | None = None) -> str:
     return "\n".join(lines)
 
 
-READ_TOOLS = (nightly_status, screen_review, list_decisions, get_report,
+READ_TOOLS = (nightly_status, recent_decisions, screen_review, list_decisions, get_report,
               pending_reviews, data_store_stats)

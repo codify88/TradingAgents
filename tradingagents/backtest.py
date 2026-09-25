@@ -250,6 +250,7 @@ def run_backtest(
 
     def record(kind: str, ticker: str, date: str | None, status: str, before, started: float):
         row = {"kind": kind, "ticker": ticker, "date": date, "status": status,
+               "at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "seconds": round(time.monotonic() - started, 1),
                "mandate": graph.mandate_name, **(tracker.snapshot() - before).asdict()}
         result.usage.append(row)

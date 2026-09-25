@@ -117,3 +117,35 @@ def test_the_server_registers_every_read_tool_as_read_only():
     names = {t.name for t in listed}
     assert names == {fn.__name__ for fn in tools.READ_TOOLS}
     assert all(t.annotations and t.annotations.read_only_hint for t in listed)
+
+
+@pytest.mark.unit
+def test_recent_decisions_uses_when_a_cell_ran_not_its_analysis_date(results):
+    from datetime import datetime, timedelta
+
+    run = results / "backtest" / "scr_a"
+    _sweep(results, "scr_a", ("PYPL", "2019-09-03", "equity_value"))
+    now = datetime.now().astimezone()
+    rows = [
+        {"kind": "cell", "ticker": "PYPL", "date": "2019-09-03", "status": "ok",
+         "mandate": "equity_value", "at": (now - timedelta(hours=3)).isoformat()},
+        {"kind": "cell", "ticker": "SBUX", "date": "2019-09-03", "status": "failed",
+         "mandate": "equity_value", "at": (now - timedelta(hours=2)).isoformat()},
+        {"kind": "cell", "ticker": "OLD", "date": "2019-09-03", "status": "ok",
+         "mandate": "equity_value", "at": (now - timedelta(days=3)).isoformat()},
+        {"kind": "cell", "ticker": "NOTS", "date": "2019-09-03", "status": "ok"},  # pre-timestamp row
+        {"kind": "settle", "ticker": "PYPL", "date": None, "status": "ok", "at": now.isoformat()},
+    ]
+    (run / "usage.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    text = tools.recent_decisions(24)
+    assert "PYPL as of 2019-09-03: Buy" in text
+    assert "SBUX as of 2019-09-03: FAILED" in text
+    assert "OLD" not in text and "NOTS" not in text
+    assert "(2)" in text
+
+
+@pytest.mark.unit
+def test_the_morning_report_fits_one_telegram_message(results, monkeypatch):
+    monkeypatch.setattr(tools, "nightly_status", lambda day=None: "x" * 5000)
+    text = tools.morning_report()
+    assert len(text) <= 4096 and text.endswith("ask for details]")

@@ -1591,6 +1591,14 @@ def schedule_export(
     console.print(f"Wake schedule written to {export(Path(path))}")
 
 
+@app.command(name="morning-report")
+def morning_report_command():
+    """Print the 08:00 report: last night's run, new decisions, reviews due this week."""
+    from tradingagents.mcp_server.tools import morning_report
+
+    print(morning_report())
+
+
 @app.command(name="store-stats")
 def store_stats(
     day: str = typer.Option(None, "--day", help="New York date, YYYY-MM-DD; default today."),

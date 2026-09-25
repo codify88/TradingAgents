@@ -198,7 +198,7 @@ def test_the_launchd_templates_are_valid(plist):
 
 
 @pytest.mark.unit
-def test_the_hermes_agent_runs_the_gateway_under_an_external_supervisor():
+def test_the_hermes_agent_runs_the_host_gateway_under_an_external_supervisor():
     text = (REPO / "scripts" / "launchd" / "com.jeremysmith.tradingagents.hermes.plist").read_text()
     assert "<string>run</string>" in text and "--external-supervisor" in text
     assert "<key>KeepAlive</key>" in text

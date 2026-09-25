@@ -10,6 +10,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>__HERMES__</string>
+        <!-- The host gateway: Hermes runs exactly one per machine, and it
+             serves every profile's platforms. The tradeops profile's Telegram
+             channel is answered with that profile's tools (read-only MCP
+             only); the default profile has no platforms, so nothing inbound
+             reaches it. -->
         <string>gateway</string>
         <string>run</string>
         <!-- launchd owns this process: in-chat restarts exit back to it
