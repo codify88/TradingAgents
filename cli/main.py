@@ -1751,6 +1751,16 @@ def evaluate_command(
     console.print(Markdown(render(trial, comparisons, verdict)))
 
 
+@app.command(name="exit-study")
+def exit_study_command():
+    """Replay every settled bullish call under trailing, tiered and volatility exits vs holding."""
+    from tradingagents.evaluation.exits import render, study
+    from tradingagents.screener.review import decision_logs
+
+    entries = [e for log in decision_logs(DEFAULT_CONFIG) for e in log.load_entries()]
+    console.print(Markdown(render(study(entries))))
+
+
 @app.command(name="screen-review")
 def screen_review(
     mandate: str = typer.Option(

@@ -1,0 +1,24 @@
+trade-agents is a fork of TauricResearch/TradingAgents (Apache License 2.0; see
+LICENSE). It adapts ideas and text from the following projects:
+
+LLMQuant/skills -- https://github.com/LLMQuant/skills
+  MIT License, Copyright (c) 2026 LLMQuant and contributors.
+  - tradingagents/evaluation/exits.py adapts the exit-rule comparison and the
+    "rollercoaster rate" from llmquant-equities/workflows/take-profit-lab.md.
+  - Investor-lens guidance adapted from llmquant-investor-lenses is marked where
+    it is used.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions: The above copyright
+  notice and this permission notice shall be included in all copies or
+  substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS",
+  WITHOUT WARRANTY OF ANY KIND.
+
+NousResearch/hermes-agent -- https://github.com/NousResearch/hermes-agent
+  MIT License, Copyright (c) 2025 Nous Research. Not vendored: used as a separate
+  process over MCP. The playbook-writing rules in the learning loop borrow its
+  skill-writing guidance (docs/design/hermes.md).
