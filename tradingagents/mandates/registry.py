@@ -34,7 +34,7 @@ def serves(decision_mandate: str | None, screen_mandate: str | None) -> bool:
         m = get_mandate(decision)
     except ValueError:
         return False
-    return bool(m and screen and m.base == screen)
+    return bool(m and screen and m.base == screen and m.scores_as_base)
 
 
 def list_mandates() -> list[Mandate]:

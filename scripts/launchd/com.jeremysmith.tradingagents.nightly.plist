@@ -28,7 +28,9 @@
         <key>NIGHTLY_MANDATE</key>
         <string>equity_value</string>
         <key>NIGHTLY_MAX_NAMES</key>
-        <string>3</string>
+        <string>5</string>
+        <key>NIGHTLY_BACKLOG</key>
+        <string>2</string>
         <key>NIGHTLY_PICKS</key>
         <string>8</string>
         <key>NIGHTLY_CONTROLS</key>

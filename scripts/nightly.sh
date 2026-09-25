@@ -21,7 +21,8 @@ LOG_DIR="$HOME/.tradingagents/logs/nightly"
 TRADINGAGENTS="$HOME/.local/bin/tradingagents"
 
 MANDATE="${NIGHTLY_MANDATE:-equity_value}"
-MAX_NAMES="${NIGHTLY_MAX_NAMES:-3}"
+MAX_NAMES="${NIGHTLY_MAX_NAMES:-5}"
+BACKLOG="${NIGHTLY_BACKLOG:-2}"
 PICKS="${NIGHTLY_PICKS:-8}"
 CONTROLS="${NIGHTLY_CONTROLS:-4}"
 BUDGET="${NIGHTLY_BUDGET:-60}"
@@ -37,7 +38,7 @@ export COLUMNS=200
 exec > >(tee -a "$LOG") 2>&1
 
 echo "=== nightly run $STAMP ==="
-echo "mandate=$MANDATE max_names=$MAX_NAMES picks=$PICKS controls=$CONTROLS budget=$BUDGET"
+echo "mandate=$MANDATE max_names=$MAX_NAMES backlog=$BACKLOG picks=$PICKS controls=$CONTROLS budget=$BUDGET"
 echo
 
 if [ ! -x "$TRADINGAGENTS" ]; then
@@ -58,8 +59,10 @@ echo
 # Scoped to $MANDATE, not every saved screen. Without this the job screens for
 # one mandate and then adjudicates whatever is oldest across all of them -- so a
 # job called "the value job" would quietly spend its budget on momentum names.
+# The queue splits the names between the screen backlog and active trials
+# (decision 5: 5 names, 2 backlog, 3 trials; unused slots go to the other side).
 echo "--- step 2: adjudicate at most $MAX_NAMES $MANDATE names [$(date +%H:%M:%S)] ---"
-"$TRADINGAGENTS" screen-run --all --mandate "$MANDATE" --max-names "$MAX_NAMES" < /dev/null
+"$TRADINGAGENTS" nightly-queue --mandate "$MANDATE" --max-names "$MAX_NAMES" --backlog "$BACKLOG" < /dev/null
 STATUS=$?
 
 echo

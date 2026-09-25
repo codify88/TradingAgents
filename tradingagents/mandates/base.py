@@ -86,6 +86,12 @@ class Mandate:
     # call), so its decisions can stand in for the base's wherever only the
     # direction is scored -- a screen's picks-vs-control comparison.
     base: str = ""
+    # Whether this overlay's decisions stand in for the base's (above). True for
+    # an overlay that only adds a choice (LEAPS). False for a *trial* overlay --
+    # investor lenses, a learned playbook -- which changes the judgement itself:
+    # its decisions must be kept apart from the base's, or the comparison the
+    # evaluation harness makes would be mixed into the base's own numbers.
+    scores_as_base: bool = True
 
     # --- extra analysts -------------------------------------------------------
     # Personas this mandate adds after upstream's analysts, each with its own

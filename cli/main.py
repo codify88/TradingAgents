@@ -1662,6 +1662,95 @@ def store_stats(
     console.print(f"{served / asked:.0%} of requests served without a fetch." if asked else "")
 
 
+@app.command(name="nightly-queue")
+def nightly_queue_command(
+    mandate: str = typer.Option(..., "--mandate", help="The base mandate whose screens and trials run."),
+    max_names: int = typer.Option(5, "--max-names", help="Names adjudicated tonight, in all."),
+    backlog: int = typer.Option(2, "--backlog", help="Of those, how many go to the screen backlog."),
+    analysts: str = typer.Option(None, "--analysts", help="Comma-separated analysts; omit for all."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the allocation and stop."),
+):
+    """Split tonight's budget between the screen backlog and active trials (decision 5)."""
+    from tradingagents.evaluation.queue import plan_night
+
+    slots = plan_night(DEFAULT_CONFIG, mandate, max_names, backlog)
+    if not slots:
+        console.print("[green]Nothing to run: every screen and trial is decided.[/green]")
+        return
+    for s in slots:
+        who = f"trial {s.trial} ({s.run_as})" if s.trial else "backlog"
+        console.print(f"{s.plan.manifest.run_id}: {s.names} name(s) for {who}")
+    if dry_run:
+        return
+    failed = 0
+    for s in slots:
+        _, plan_failed = _run_screen_plan(s.plan, analysts, limit=s.names)
+        failed += plan_failed
+    if failed:
+        console.print(f"[yellow]{failed} cell(s) failed; see above.[/yellow]")
+        raise typer.Exit(code=2)
+
+
+trial_app = typer.Typer(help="Candidate mandates tested against their base on fixed screens.")
+app.add_typer(trial_app, name="trial")
+
+
+@trial_app.command(name="register")
+def trial_register(
+    trial_id: str = typer.Argument(..., help="A short id, e.g. value-lenses-1."),
+    kind: str = typer.Option(..., "--kind", help="overlay | playbook | strategy"),
+    style: str = typer.Option(..., "--style", help="e.g. value; the bar counts trials per style."),
+    base: str = typer.Option(..., "--base", help="The base mandate, e.g. equity_value."),
+    candidate: str = typer.Option(..., "--candidate", help="The candidate mandate."),
+    screens: str = typer.Option(..., "--screens", help="Comma-separated saved-screen ids, fixed now."),
+    evidence_through: str = typer.Option(None, "--evidence-through",
+                                         help="For a playbook: screens must be dated after this."),
+    notes: str = typer.Option("", "--notes"),
+):
+    """Register a trial; its screens are fixed at registration."""
+    from tradingagents.evaluation.trials import register
+
+    try:
+        t = register(DEFAULT_CONFIG, trial_id=trial_id, kind=kind, style=style, base=base,
+                     candidate=candidate, screens=[x.strip() for x in screens.split(",") if x.strip()],
+                     evidence_through=evidence_through, notes=notes)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(f"Registered {t.id}: {t.candidate} vs {t.base} on {len(t.screens)} screens.")
+
+
+@trial_app.command(name="list")
+def trial_list():
+    """Every trial, with its status."""
+    from tradingagents.evaluation.trials import load_trials
+
+    trials = load_trials(DEFAULT_CONFIG)
+    if not trials:
+        console.print("No trials registered.")
+    for t in trials:
+        console.print(f"{t.id}: {t.candidate} vs {t.base} ({t.kind}, {t.style}) -- {t.status}, "
+                      f"{len(t.screens)} screens, created {t.created}")
+
+
+@app.command(name="evaluate")
+def evaluate_command(
+    trial_id: str = typer.Argument(..., help="The trial to judge."),
+    no_record: bool = typer.Option(False, "--no-record", help="Show the verdict without recording it."),
+):
+    """Judge a trial against the promotion bar: candidate edge vs base edge, screen by screen."""
+    from tradingagents.evaluation.compare import evaluate, render
+    from tradingagents.evaluation.trials import get_trial
+
+    try:
+        trial = get_trial(DEFAULT_CONFIG, trial_id)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    comparisons, verdict = evaluate(trial, DEFAULT_CONFIG, record=not no_record)
+    console.print(Markdown(render(trial, comparisons, verdict)))
+
+
 @app.command(name="screen-review")
 def screen_review(
     mandate: str = typer.Option(

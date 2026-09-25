@@ -164,7 +164,7 @@ def _alpha(entry: dict, benchmark: str | None = None) -> float:
 
 def _group(
     label: str, symbols: list[str], entries: list[dict], as_of: str, mandate: str = "",
-    benchmark: str | None = None,
+    benchmark: str | None = None, match=serves,
 ) -> GroupOutcome:
     alphas, pending = [], 0
     for symbol in symbols:
@@ -173,7 +173,7 @@ def _group(
         # different horizon, and says nothing about this screen.
         matches = [e for e in entries
                    if e["ticker"] == symbol and e["date"] == as_of
-                   and serves(e.get("mandate"), mandate)
+                   and match(e.get("mandate"), mandate)
                    and not e.get("superseded")]
         if not matches:
             pending += 1
