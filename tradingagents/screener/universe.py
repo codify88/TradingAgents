@@ -106,6 +106,15 @@ def one_line_per_issuer(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(kept, key=lambda c: c.symbol)
 
 
+# Exchange test issues (ZVZZT, ZXZZT, ZWZZT, ...): symbols the venues list to
+# test their systems. One reached a replayed 2012 screen with a +519% week.
+_TEST_SYMBOL = re.compile(r"^Z[A-Z]ZZT$")
+
+
+def test_issue(symbol: str) -> bool:
+    return bool(_TEST_SYMBOL.match(symbol))
+
+
 def derivative_line(symbol: str, name: str, listed: set[str]) -> str | None:
     """Why ``symbol`` is a warrant, right, unit, note or preferred -- or None.
 
@@ -210,7 +219,7 @@ def load_universe(
         # cost a price download only to be dropped as "no price history".
         if derivative_line(row.get("symbol", ""), row.get("name", ""), listed_symbols):
             continue
-        if pooled_vehicle(row.get("name", "")):
+        if pooled_vehicle(row.get("name", "")) or test_issue(row.get("symbol", "")):
             continue
         ipo = row.get("ipoDate") or ""
         try:

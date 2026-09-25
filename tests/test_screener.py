@@ -852,6 +852,11 @@ class TestRunBudget:
         assert set(seen["cells"]) == {"AAA", "BBB", "CCC"}
 
 
+def test_exchange_test_issues_are_not_companies():
+    assert universe.test_issue("ZXZZT") and universe.test_issue("ZVZZT")
+    assert not universe.test_issue("ZTS") and not universe.test_issue("ZZZT")
+
+
 class TestStandardScreen:
     """No mandate: prices only, every survivor ranked by a lab signal, computed
     by the lab's own code."""

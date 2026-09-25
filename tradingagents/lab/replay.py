@@ -102,7 +102,11 @@ class Context:
         self.RC = panel.raw_close.to_numpy(np.float64)
         self.DVd = self.RC * panel.volume.to_numpy(np.float64)
         self._listings = sorted(universes)
-        self._members = {d: np.array([self.col[s] for s in syms if s in self.col], dtype=int)
+        from tradingagents.screener.universe import test_issue
+
+        # Universes saved before test issues were excluded may still hold them.
+        self._members = {d: np.array([self.col[s] for s in syms if s in self.col and not test_issue(s)],
+                                     dtype=int)
                          for d, syms in universes.items()}
         self._cache: dict[tuple, np.ndarray] = {}
 
