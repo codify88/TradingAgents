@@ -25,18 +25,21 @@ from .playbook import Playbook, Rule, latest, save
 
 MAX_LESSONS = 80
 MAX_LESSON_CHARS = 700
-MAX_RULE_CHARS = 300
-MAX_WHY_CHARS = 240
+MAX_RULE_CHARS = 350
+MAX_WHY_CHARS = 300
 _DATE = re.compile(r"\b(19|20)\d{2}(-\d{2})?\b")
 
 
 class RuleEdit(BaseModel):
     action: Literal["add", "strengthen", "archive"]
     rule_id: str | None = Field(None, description="For strengthen/archive: the existing rule's id.")
-    text: str = Field(description="The rule: one imperative sentence that generalises. No tickers, no dates.")
-    why: str = Field(description="One clause: the mechanism that makes the rule true.")
-    supports: list[str] = Field(default_factory=list, description="Lesson ids whose outcome supports the rule.")
-    contradicts: list[str] = Field(default_factory=list, description="Lesson ids whose outcome contradicts it.")
+    text: str = Field(description="The rule: one imperative sentence that generalises, at most 250 "
+                                  "characters. No tickers, no company names, no dates.")
+    why: str = Field(description="One clause, at most 200 characters: the mechanism that makes the rule true.")
+    supports: list[str] = Field(default_factory=list, description="Ids of lessons whose OUTCOME supports the "
+                                "rule, copied exactly as shown in square brackets. At least one.")
+    contradicts: list[str] = Field(default_factory=list, description="Ids of lessons whose outcome contradicts "
+                                   "it, copied exactly as shown in square brackets.")
 
 
 class Proposal(BaseModel):
@@ -45,13 +48,16 @@ class Proposal(BaseModel):
 
 WRITING_RULES = """How to write a playbook rule (adapted from Hermes' skill-writing rules):
 - A rule is a generalisable instruction plus one clause of WHY -- the mechanism.
-  Not a narrative of what happened to one company.
+  Not a narrative of what happened to one company. Keep the rule to one sentence
+  of at most 250 characters and the why to at most 200; longer edits are
+  rejected unread.
 - No tickers, company names or dates in the rule or its why; the lesson ids you
   cite carry those.
 - The same lesson learned twice is ONE rule: strengthen an existing rule (cite
   the new lessons) rather than adding a near-copy.
 - Cite every lesson whose OUTCOME supports the rule, and every one whose outcome
-  contradicts it. Honest contradictions are required, not optional.
+  contradicts it, copying ids exactly as they appear in square brackets. A rule
+  with no supporting lesson is rejected; honest contradictions are required.
 - Propose archiving a rule when the evidence now runs against it.
 - Prefer few, strong rules to many weak ones. Propose nothing if nothing is
   supported."""
@@ -83,7 +89,8 @@ class DistillResult:
             lines.append(f"Playbook {self.playbook.mandate} v{self.playbook.version}: {len(self.playbook.rules)} rules, "
                          f"{eligible} eligible; built from outcomes known by {self.playbook.available_at}.")
         lines.append(f"Accepted {len(self.accepted)} edit(s), rejected {len(self.rejected)}.")
-        lines += [f"- rejected ({why}): {e.text[:100]}" for e, why in self.rejected]
+        lines += [f"- rejected ({why}; cited {len(e.supports)} for, {len(e.contradicts)} against): "
+                  f"{e.text[:100]}" for e, why in self.rejected]
         lines += [f"- {rid}: {note}" for rid, note in self.gate_notes.items()]
         return "\n".join(lines)
 
