@@ -117,6 +117,9 @@ def test_the_server_registers_every_read_tool_as_read_only():
     reads = {fn.__name__ for fn in tools.READ_TOOLS}
     assert set(listed) == reads | {fn.__name__ for fn in tools.ACTION_TOOLS}
     assert all(listed[n].annotations and listed[n].annotations.read_only_hint for n in reads)
+    # Anything that sends orders or stops trading must be an action, so Hermes asks first.
+    for name in ("submit_order_plan", "halt_trading", "screen_run", "retry_failed"):
+        assert not listed[name].annotations.read_only_hint, name
 
 
 @pytest.mark.unit

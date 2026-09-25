@@ -322,6 +322,45 @@ def retry_failed(day: str | None = None) -> str:
     return msg + (f" {others} other screen(s) also had failures; retry them after this one." if others else "")
 
 
+def trade_status() -> str:
+    """The standard strategy's paper book: live cohorts, halt and mismatch switches, the
+    account, and the pending order plan if there is one."""
+    from tradingagents.trading import execute as ex, plan as pl
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+
+    try:
+        broker = AlpacaBroker(_config())
+    except BrokerError:
+        broker = None
+    pending = pl.latest_pending(_config())
+    return ex.status(_config(), broker) + "\n\n" + (pl.render(pending) if pending else "No pending order plan.")
+
+
+def submit_order_plan(plan_id: str) -> str:
+    """Send a pending order plan's market-on-open orders to the paper account. Refused if
+    the plan expired, trading is halted, or reconciliation found an unacknowledged mismatch."""
+    from tradingagents.trading import execute as ex
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+
+    try:
+        return ex.submit(_config(), AlpacaBroker(_config()), plan_id)
+    except (BrokerError, ValueError) as exc:
+        return f"Nothing sent: {exc}"
+
+
+def halt_trading(reason: str = "operator via Hermes") -> str:
+    """Kill switch: refuse every new order and cancel open ones; positions are kept.
+    Lifting it is done at the terminal (`tradingagents trade resume`)."""
+    from tradingagents.trading import execute as ex
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+
+    try:
+        broker = AlpacaBroker(_config())
+    except BrokerError:
+        broker = None
+    return ex.halt(_config(), broker, reason)
+
+
 READ_TOOLS = (nightly_status, recent_decisions, screen_review, list_decisions, get_report,
-              pending_reviews, data_store_stats, harvest_status, job_status)
-ACTION_TOOLS = (screen_run, retry_failed)
+              pending_reviews, data_store_stats, harvest_status, job_status, trade_status)
+ACTION_TOOLS = (screen_run, retry_failed, submit_order_plan, halt_trading)

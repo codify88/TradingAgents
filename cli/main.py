@@ -1889,6 +1889,121 @@ def lab_show(strategy: str = typer.Option("standard", "--strategy")):
                   else "\nLive screen uses: the default (nothing adopted).")
 
 
+trade_app = typer.Typer(help="Paper execution for the standard strategy: plans, approval, halt, reconcile.")
+app.add_typer(trade_app, name="trade")
+
+
+def _broker():
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+
+    try:
+        return AlpacaBroker(DEFAULT_CONFIG)
+    except BrokerError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+
+
+@trade_app.command(name="plan")
+def trade_plan(
+    decision_date: str = typer.Option(None, "--decision-date",
+                                      help="The standard screen's date (default: the session's date)."),
+    entry: str = typer.Option(None, "--entry", help="agents (Buy/Overweight picks) | screen (every pick)."),
+):
+    """Build the order plan for the next open. Sends nothing."""
+    from tradingagents.trading import plan as pl
+    from tradingagents.trading.book import load_book
+
+    config = dict(DEFAULT_CONFIG)
+    if entry:
+        config["trading_rules"] = {**(config.get("trading_rules") or {}), "entry": entry}
+    p = pl.build(config, _broker(), load_book(config), decision_date)
+    pl.save_plan(config, p)
+    console.print(pl.render(p))
+
+
+@trade_app.command(name="show")
+def trade_show(plan_id: str = typer.Argument(None, help="Default: the latest pending plan.")):
+    """An order plan, as it would be sent."""
+    from tradingagents.trading import plan as pl
+
+    try:
+        p = pl.load_plan(DEFAULT_CONFIG, plan_id) if plan_id else pl.latest_pending(DEFAULT_CONFIG)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(pl.render(p) if p else "No pending order plan.")
+
+
+@trade_app.command(name="submit")
+def trade_submit(
+    plan_id: str = typer.Argument(..., help="The plan to send."),
+    yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt."),
+):
+    """Approve and send a plan's orders (market-on-open)."""
+    from tradingagents.trading import execute as ex, plan as pl
+
+    try:
+        console.print(pl.render(pl.load_plan(DEFAULT_CONFIG, plan_id)))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    if not yes and not typer.confirm("Send these orders?"):
+        raise typer.Exit(code=1)
+    console.print(ex.submit(DEFAULT_CONFIG, _broker(), plan_id))
+
+
+@trade_app.command(name="halt")
+def trade_halt(reason: str = typer.Option("operator", "--reason")):
+    """Kill switch: refuse every new order and cancel open ones. Positions are kept."""
+    from tradingagents.trading import execute as ex
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+
+    try:
+        broker = AlpacaBroker(DEFAULT_CONFIG)
+    except BrokerError:
+        broker = None  # halting must work even without the broker
+    console.print(ex.halt(DEFAULT_CONFIG, broker, reason))
+
+
+@trade_app.command(name="resume")
+def trade_resume():
+    """Lift a halt."""
+    from tradingagents.trading import execute as ex
+
+    console.print(ex.resume(DEFAULT_CONFIG))
+
+
+@trade_app.command(name="ack")
+def trade_ack():
+    """Acknowledge reconciliation mismatches, after checking the broker, so plans can be sent again."""
+    from tradingagents.trading import execute as ex
+
+    console.print(ex.acknowledge(DEFAULT_CONFIG))
+
+
+@trade_app.command(name="reconcile")
+def trade_reconcile():
+    """Book the day's fills and compare the book with the broker; mismatches block new orders."""
+    from tradingagents.trading import execute as ex
+
+    problems = ex.reconcile(DEFAULT_CONFIG, _broker())
+    console.print("Book and broker agree." if not problems else
+                  "Mismatches (new orders are blocked until `trade ack`):\n" + "\n".join(f"  {p}" for p in problems))
+
+
+@trade_app.command(name="status")
+def trade_status():
+    """Live cohorts, switches, and the paper account."""
+    from tradingagents.trading import execute as ex
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+
+    try:
+        broker = AlpacaBroker(DEFAULT_CONFIG)
+    except BrokerError:
+        broker = None
+    console.print(ex.status(DEFAULT_CONFIG, broker))
+
+
 learn_app = typer.Typer(help="Playbooks distilled from settled outcomes, gated by evidence.")
 app.add_typer(learn_app, name="learn")
 
