@@ -65,7 +65,8 @@ class TestDownloadAv:
         with patch.object(fin, "_make_api_request", return_value=CSV):
             data = prices.download_av(["X"], "2024-06-07", "2024-06-11")
         f = data.frames["X"]
-        assert list(f.columns) == ["Open", "High", "Low", "Close", "Volume"]
+        # Yahoo's columns, plus the close as traded for the price and liquidity floors.
+        assert list(f.columns) == ["Open", "High", "Low", "Close", "Volume", "Raw Close"]
         assert [d.strftime("%m-%d") for d in f.index] == ["06-07", "06-10"]
 
     def test_a_vendor_error_is_unavailable_and_no_history_is_not(self, monkeypatch):

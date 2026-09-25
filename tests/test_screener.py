@@ -116,6 +116,14 @@ class TestInvestability:
         assert any("insufficient" in r for r in
                    screen.investability_exclusions(_frame(n=60)))
 
+    def test_the_floors_read_the_price_as_traded_not_as_adjusted(self):
+        """A 2019 close adjusted for every later split and dividend sits far under
+        what the stock cost then; the floors must read what it traded at."""
+        frame = _frame(price=4.0, step=0.0)
+        frame["Raw Close"] = 40.0
+        assert not any("price below" in r for r in screen.investability_exclusions(frame))
+        assert prices.dollar_volume(frame) == pytest.approx(40.0 * frame["Volume"].iloc[-1])
+
     def test_median_not_mean_dollar_volume(self):
         """One index-rebalance day must not make an untradeable name look liquid."""
         frame = _frame(volume=1_000)
@@ -842,3 +850,58 @@ class TestRunBudget:
             runner=lambda cells, dates, config, **kw: seen.update(cells=cells) or None,
         )
         assert set(seen["cells"]) == {"AAA", "BBB", "CCC"}
+
+
+class TestStandardScreen:
+    """No mandate: prices only, every survivor ranked by a lab signal, computed
+    by the lab's own code."""
+
+    def _frames(self):
+        # S00 fell hardest last week, S09 rose most: reversal ranks S00 first.
+        frames = {}
+        for k in range(10):
+            f = _frame(n=300, price=50.0, step=0.0)
+            f.loc[f.index[-5]:, "Close"] = 50.0 * (1 + (k - 5) / 100)
+            frames[f"S{k:02d}"] = f
+        frames["SPY"] = _frame()
+        return frames
+
+    def _run(self, monkeypatch, tmp_path, **kwargs):
+        frames = self._frames()
+        monkeypatch.setattr(
+            screen, "load_universe",
+            lambda as_of, limit=None: [universe.Candidate(s, s, "NYSE", "2010-01-01")
+                                       for s in frames if s != "SPY"])
+        monkeypatch.setattr(
+            screen.prices, "download_av",
+            lambda syms, start, end, **kw: prices.PriceData(
+                frames={s: frames[s] for s in syms if s in frames}))
+        called = []
+        monkeypatch.setattr(screen, "fundamental_exclusions",
+                            lambda *a, **k: called.append(a) or ([], float("nan")))
+        config = {"results_dir": str(tmp_path), "data_cache_dir": str(tmp_path)}
+        result = screen.run_screen("", "2026-09-17", config, picks=3, controls=2,
+                                   requests_per_minute=100_000, control_seed=1, **kwargs)
+        return result, called
+
+    def test_ranks_by_the_requested_lab_signal_without_fundamentals(self, monkeypatch, tmp_path):
+        result, called = self._run(monkeypatch, tmp_path, ordering="reversal_5d")
+        m = result.manifest
+        assert m.mandate == "" and "_none_" in m.run_id
+        assert m.pick_symbols == ["S00", "S01", "S02"]
+        assert len(m.control_symbols) == 2 and not set(m.control_symbols) & set(m.pick_symbols)
+        assert called == []  # no statements asked for
+        assert "reversal_5d" in m.ordering_signal
+
+    def test_uses_the_adopted_variant_and_its_floor(self, monkeypatch, tmp_path):
+        from tradingagents.lab.adopted import adopt, standard_ordering
+
+        config = {"data_cache_dir": str(tmp_path)}
+        assert standard_ordering(config).source.startswith("default")
+        adopt(config, "standard", "momentum_21d/p8/dv5m", "test")
+        o = standard_ordering(config)
+        assert o.signal == "momentum_21d" and o.source.startswith("adopted")
+        result, _ = self._run(monkeypatch, tmp_path)
+        assert result.manifest.pick_symbols[0] == "S09"
+        with pytest.raises(ValueError):
+            adopt(config, "standard", "random/p8/dv5m")

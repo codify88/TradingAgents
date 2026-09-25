@@ -219,7 +219,8 @@ def download_av(
             continue
         frame = frame[(frame.index >= lo) & (frame.index < hi)]
         if not frame.empty:
-            data.frames[symbol] = frame[["Open", "High", "Low", "Close", "Volume"]]
+            cols = ["Open", "High", "Low", "Close", "Volume"] + (["Raw Close"] if "Raw Close" in frame else [])
+            data.frames[symbol] = frame[cols]
     return data
 
 
@@ -252,4 +253,8 @@ def dollar_volume(frame: pd.DataFrame, days: int = 63) -> float:
     if frame.empty or "Volume" not in frame:
         return float("nan")
     recent = frame.iloc[-days:]
-    return float((recent["Close"] * recent["Volume"]).median())
+    # Shares as reported times the price they traded at: an adjusted close
+    # against unadjusted volume understates a past date's dollar volume by
+    # every split since.
+    price = recent["Raw Close"] if "Raw Close" in recent else recent["Close"]
+    return float((price * recent["Volume"]).median())

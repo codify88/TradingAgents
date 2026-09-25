@@ -1359,12 +1359,19 @@ def backtest(
 @app.command()
 def screen(
     mandate: str = typer.Option(
-        ..., "--mandate", help="Investment mandate to screen for, e.g. equity_value"
+        ..., "--mandate",
+        help="Investment mandate to screen for, e.g. equity_value; `none` for the standard "
+             "(no-mandate, 5-day) strategy's price-only screen.",
     ),
     date: str = typer.Option(
         None, "--date", help="As-of date, YYYY-MM-DD. Defaults to today."
     ),
-    picks: int = typer.Option(8, "--picks", help="How many names to shortlist."),
+    picks: int = typer.Option(
+        None, "--picks", help="How many names to shortlist (8; standard: the adopted variant's)."),
+    ordering: str = typer.Option(
+        None, "--ordering",
+        help="Standard only: a screen-lab signal to rank by instead of the adopted one.",
+    ),
     controls: int = typer.Option(
         3, "--controls",
         help="Random control names drawn from the eligible pool the ranking did "
@@ -1401,11 +1408,19 @@ def screen(
     from tradingagents.screener.review import render_screen
 
     as_of = date or datetime.datetime.now().strftime("%Y-%m-%d")
-    console.print(f"[cyan]Screening for {mandate} as of {as_of}…[/cyan]")
+    if mandate.lower() in ("none", "standard"):
+        mandate = ""
+    if picks is None:
+        from tradingagents.lab.adopted import current
+
+        adopted = current(DEFAULT_CONFIG, "standard") if not mandate else None
+        picks = int(adopted["picks"]) if adopted and not ordering else 8
+    console.print(f"[cyan]Screening for {mandate or 'the standard strategy'} as of {as_of}…[/cyan]")
     try:
         result = run_screen(
             mandate, as_of, DEFAULT_CONFIG, picks=picks, controls=controls,
             fundamental_budget=budget, universe_limit=universe_limit, control_seed=seed,
+            ordering=ordering if not mandate else None,
         )
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -1429,7 +1444,8 @@ def screen(
         f"[dim]Run the shortlist and its control through the loop:[/dim]\n"
         f"  tradingagents screen-run {short_id}\n"
         f"[dim]or, equivalently:[/dim]\n"
-        f"  tradingagents backtest {names} --start {as_of} --end {as_of} --mandate {mandate}"
+        f"  tradingagents backtest {names} --start {as_of} --end {as_of}"
+        + (f" --mandate {mandate}" if mandate else "")
     )
 
 
@@ -1788,6 +1804,89 @@ def exit_study_command():
 
     entries = [e for log in decision_logs(DEFAULT_CONFIG) for e in log.load_entries()]
     console.print(Markdown(render(study(entries))))
+
+
+lab_app = typer.Typer(help="The screen lab: replay screens on past dates, tune, and suggest (no model calls).")
+app.add_typer(lab_app, name="lab")
+
+
+@lab_app.command(name="prices")
+def lab_prices(
+    max_requests: int = typer.Option(6000, "--max-requests", help="Histories to fetch at most (one request each)."),
+    no_fetch: bool = typer.Option(False, "--no-fetch", help="Rebuild the panel from what is stored; fetch nothing."),
+):
+    """Monthly universes since 2012, every missing history, then the price panel."""
+    from tradingagents.lab import panel
+
+    moved = panel.import_legacy(DEFAULT_CONFIG)
+    unis = panel.universes(DEFAULT_CONFIG)
+    need = panel.needed_symbols(unis)
+    console.print(f"{len(unis)} monthly universes, {len(need):,} names; {moved:,} legacy histories moved to the store.")
+    if not no_fetch:
+        r = panel.fetch_missing(DEFAULT_CONFIG, need, max_requests)
+        console.print(f"Fetched {r.fetched:,}, no history {r.empty:,}, failed {r.failed:,} ({r.stopped}).")
+    p = panel.build_panel(DEFAULT_CONFIG, need)
+    path = panel.save_panel(p, DEFAULT_CONFIG)
+    console.print(f"Panel: {p.close.shape[1]:,} names x {p.close.shape[0]:,} days -> {path}")
+
+
+@lab_app.command(name="run")
+def lab_run(
+    strategy: str = typer.Option("standard", "--strategy", help="standard | momentum"),
+    split: str = typer.Option("2020-01-01", "--split", help="Tune before this date, test from it."),
+    start: str = typer.Option("2012-01-01", "--start", help="First schedule date."),
+):
+    """Replay every variant, count them as trials, and suggest a change only if one clears the bar."""
+    from tradingagents.lab import panel, replay, report
+
+    if strategy not in replay.STRATEGIES:
+        console.print(f"[red]Unknown strategy {strategy!r}; choose from {', '.join(replay.STRATEGIES)}.[/red]")
+        raise typer.Exit(code=1)
+    p = panel.load_panel(DEFAULT_CONFIG)
+    if p is None:
+        console.print("[red]No price panel yet: run `tradingagents lab prices` first.[/red]")
+        raise typer.Exit(code=1)
+    spec = replay.STRATEGIES[strategy]
+    ctx = replay.Context(p, panel.universes(DEFAULT_CONFIG, dates=[]))
+    results = replay.evaluate(ctx, spec, split, start, progress=lambda v: console.print(f"[dim]{v}[/dim]"))
+    trials = report.record_trials(DEFAULT_CONFIG, spec, results)
+    v = report.verdict(spec, results, trials)
+    report.save_suggestion(DEFAULT_CONFIG, v)
+    text = report.render(spec, results, v, split)
+    out = panel.lab_dir(DEFAULT_CONFIG) / f"{strategy}-report.md"
+    out.write_text(text)
+    console.print(Markdown(text))
+    console.print(f"\n[dim]Saved: {out}[/dim]")
+
+
+@lab_app.command(name="adopt")
+def lab_adopt(
+    strategy: str = typer.Argument(..., help="standard | momentum"),
+    variant: str = typer.Argument(..., help="A variant id from `lab run`, e.g. reversal_5d/p8/dv25m."),
+    reason: str = typer.Option("", "--reason", help="Why, for the record."),
+):
+    """Make a lab variant the live screen's ordering (recorded, versioned, reversible)."""
+    from tradingagents.lab.adopted import adopt
+
+    try:
+        row = adopt(DEFAULT_CONFIG, strategy, variant, reason)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(f"Adopted {row['variant']} for {strategy} at {row['at']}; the next screen uses it.")
+
+
+@lab_app.command(name="show")
+def lab_show(strategy: str = typer.Option("standard", "--strategy")):
+    """The last lab report for a strategy and what its live screen uses."""
+    from tradingagents.lab import panel
+    from tradingagents.lab.adopted import current
+
+    path = panel.lab_dir(DEFAULT_CONFIG) / f"{strategy}-report.md"
+    console.print(Markdown(path.read_text()) if path.exists() else f"No lab run for {strategy} yet.")
+    row = current(DEFAULT_CONFIG, strategy)
+    console.print(f"\nLive screen uses: {row['variant']} (adopted {row['at']})" if row
+                  else "\nLive screen uses: the default (nothing adopted).")
 
 
 learn_app = typer.Typer(help="Playbooks distilled from settled outcomes, gated by evidence.")

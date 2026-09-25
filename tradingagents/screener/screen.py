@@ -90,13 +90,20 @@ def investability_exclusions(frame: pd.DataFrame) -> list[str]:
         out.append("insufficient price history")
     if frame.empty:
         return out
-    price = float(frame["Close"].iloc[-1])
+    # The price as traded that day. An adjusted close folds in every later split
+    # and dividend, so on a 2019 screen date it sits well under what the stock
+    # cost then, and the floor would drop names that were never under $5.
+    price = float(frame[_traded(frame)].iloc[-1])
     if math.isnan(price) or price < MIN_PRICE:
         out.append(f"price below ${MIN_PRICE:.0f}")
     dv = prices.dollar_volume(frame)
     if math.isnan(dv) or dv < MIN_DOLLAR_VOLUME:
         out.append(f"median dollar volume below ${MIN_DOLLAR_VOLUME:,.0f}")
     return out
+
+
+def _traded(frame: pd.DataFrame) -> str:
+    return "Raw Close" if "Raw Close" in frame else "Close"
 
 
 def price_exclusions(mandate: Mandate | None, frame: pd.DataFrame, bench: pd.DataFrame) -> list[str]:
@@ -245,22 +252,33 @@ def run_screen(
     universe_limit: int | None = None,
     control_seed: int | None = None,
     requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE,
+    ordering: str | None = None,
 ) -> ScreenResult:
     """Narrow the universe to a shortlist, with a random control drawn alongside.
+
+    With no mandate (``mandate_name`` empty) this is the standard strategy's
+    screen: prices only, every price survivor ranked by one of the screen lab's
+    signals -- ``ordering``, else the one adopted in the lab, else liquidity --
+    computed by the lab's own code, so what the lab tuned is what runs.
 
     Today's Alpha Vantage price answers are kept on disk for the run (and for
     the day), so a rerun -- or another date's screen -- pays only for the gaps.
     """
     with daily_disk_cache(config.get("data_cache_dir") or DEFAULT_CONFIG["data_cache_dir"]):
         return _run_screen(mandate_name, as_of, config, picks, controls, fundamental_budget,
-                           universe_limit, control_seed, requests_per_minute)
+                           universe_limit, control_seed, requests_per_minute, ordering)
 
 
 def _run_screen(
     mandate_name, as_of, config, picks, controls, fundamental_budget,
-    universe_limit, control_seed, requests_per_minute,
+    universe_limit, control_seed, requests_per_minute, ordering=None,
 ) -> ScreenResult:
     mandate = get_mandate(mandate_name)
+    standard = None
+    if mandate is None:
+        from tradingagents.lab.adopted import standard_ordering
+
+        standard = standard_ordering(config, ordering)
     as_of_ts = pd.Timestamp(as_of)
     start = (as_of_ts - pd.Timedelta(days=int(365 * 1.6))).strftime("%Y-%m-%d")
     end = (as_of_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
@@ -307,6 +325,11 @@ def _run_screen(
     usable = price_data.failure_rate <= MAX_UNAVAILABLE_FRACTION
     if not usable:
         survivors = []
+
+    if standard is not None:
+        return _finish_standard(standard, mandate_name, as_of, universe, frames, survivors,
+                                tiers, excluded, price_data, usable, delisted, picks, controls,
+                                control_seed)
 
     # The cut into the expensive tier is by liquidity, which is neutral to both
     # mandates: ordering here on a mandate's own signal would apply it twice.
@@ -426,6 +449,67 @@ def _run_screen(
     return ScreenResult(
         manifest=manifest, eligible=eligible, excluded=excluded, usable=usable,
     )
+
+
+def _finish_standard(standard, mandate_name, as_of, universe, frames, survivors, tiers,
+                     excluded, price_data, usable, delisted, picks, controls, control_seed):
+    """The standard screen after the price tier: the lab's liquidity floor and
+    signal over every survivor (no fundamentals tier, no liquidity budget)."""
+    from tradingagents.lab.live import rank
+
+    reasons: Counter = Counter()
+    floor = standard.min_dollar_volume
+    liquid = []
+    for symbol in survivors:
+        if prices.dollar_volume(frames[symbol]) < floor:
+            reason = f"median dollar volume below the strategy's ${floor:,.0f}"
+            excluded[symbol] = [reason]
+            reasons[reason] += 1
+        else:
+            liquid.append(symbol)
+    ordering, unplaced = rank(standard.signal, {s: frames[s] for s in liquid}, as_of)
+    for symbol in unplaced:
+        excluded[symbol] = [NO_ORDERING_VALUE]
+        reasons[NO_ORDERING_VALUE] += 1
+    eligible = [s for s in liquid if s in ordering]
+    tiers.append(TierStat("ordering", len(survivors), len(eligible), dict(reasons)))
+
+    ranked = sorted(eligible, key=lambda s: ordering[s], reverse=True)
+    names = {c.symbol: c.name for c in universe}
+    seen: set[str] = set()
+    one_class = []
+    for symbol in ranked:
+        key = company_key(names.get(symbol, symbol)) or symbol
+        if key in seen:
+            excluded[symbol] = [ANOTHER_SHARE_CLASS]
+            continue
+        seen.add(key)
+        one_class.append(symbol)
+    chosen = one_class[:picks]
+    pool = one_class[picks:]
+    seed = control_seed if control_seed is not None else random.randrange(2**31)
+    control = random.Random(seed).sample(pool, min(controls, len(pool)))
+
+    notes = [f"Standard strategy screen ({standard.source}): {standard.describe}."]
+    if delisted:
+        notes.append(survivorship_note(delisted, survivors, survivors, [], eligible))
+    if not usable:
+        chosen, control = [], []
+        notes.append(
+            f"NO SHORTLIST: the price vendor could not answer for {len(price_data.unavailable):,} "
+            f"of {len(universe):,} names ({price_data.failure_rate:.0%}), above the "
+            f"{MAX_UNAVAILABLE_FRACTION:.0%} limit. Re-run when the vendor recovers.")
+    manifest = ScreenManifest(
+        run_id=make_run_id(mandate_name, as_of), mandate=mandate_name or "", as_of=as_of,
+        created=pd.Timestamp.now().isoformat(timespec="seconds"), universe_size=len(universe),
+        tiers=[{"name": t.name, "examined": t.examined, "kept": t.kept,
+                "dropped": t.dropped, "reasons": t.reasons} for t in tiers],
+        ordering_signal=standard.describe,
+        picks=[{"symbol": s, "rank": i + 1, "value": _safe(ordering.get(s))} for i, s in enumerate(chosen)],
+        controls=[{"symbol": s, "value": _safe(ordering.get(s))} for s in control],
+        control_seed=seed, eligible_count=len(eligible), notes=notes,
+    )
+    return ScreenResult(manifest=manifest, eligible=eligible, excluded=excluded, usable=usable)
 
 
 DELISTED_NO_STATEMENTS = (
