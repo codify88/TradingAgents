@@ -156,3 +156,14 @@ def test_a_passing_suggestion_stays_open_until_adopted(tmp_path):
     assert "lab adopt standard reversal_5d/p8/dv5m" in lr.render_suggestions(config)
     adopted.adopt(config, "standard", "reversal_5d/p8/dv5m")
     assert lr.open_suggestions(config) == []
+
+
+def test_a_pool_ranks_only_within_the_most_liquid_names():
+    p = _panel(n_names=12)
+    for k, s in enumerate([f"N{j:02d}" for j in range(12)]):
+        p.volume[s] = 1e6 * 8.0 ** k  # N11 most liquid, whatever the prices
+    ctx = rp.Context(p, _unis(p))
+    rows = rp.replay(ctx, STD, rp.Variant("random", 2, 1e6, pool=4), ctx.schedule("week", "2015-01-01"))
+    assert rows and all(r.eligible == 4 for r in rows)
+    assert {s for r in rows for s in r.chosen} <= {"N08", "N09", "N10", "N11"}
+    assert rp.Variant("random", 2, 1e6, pool=4).id.endswith("/top4")

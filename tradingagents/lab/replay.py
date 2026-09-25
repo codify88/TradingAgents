@@ -56,6 +56,9 @@ class Strategy:
     signals: tuple[str, ...]
     picks: tuple[int, ...] = (8, 20)
     min_dollar_volume: tuple[float, ...] = (5e6, 25e6)
+    # Rank only within the N most liquid eligible names (None: all of them).
+    # The live value and momentum screens rank within their 60-name liquidity budget.
+    pools: tuple[int | None, ...] = (None,)
     note: str = ""
 
 
@@ -68,8 +71,9 @@ STRATEGIES = {
     "momentum": Strategy(
         "equity_momentum", 126, "MTUM", "month",
         ("excess_12m", "momentum_12_1", "high_52w", "low_vol_63", "random", "liquidity"),
-        note="Price tier and ordering only: the live screen's trend and growth "
-             "exclusions are not replayed yet, so this tests the ordering, not the whole screen."),
+        pools=(None, 60),
+        note="Price tier and ordering only: the live screen's trend and growth exclusions are not "
+             "replayed yet. Pool 60 ranks within the 60 most liquid names, as the live screen does."),
 }
 
 
@@ -78,15 +82,17 @@ class Variant:
     signal: str
     picks: int
     min_dollar_volume: float
+    pool: int | None = None
 
     @property
     def id(self) -> str:
-        return f"{self.signal}/p{self.picks}/dv{self.min_dollar_volume / 1e6:g}m"
+        base = f"{self.signal}/p{self.picks}/dv{self.min_dollar_volume / 1e6:g}m"
+        return base + (f"/top{self.pool}" if self.pool else "")
 
 
 def variants(strategy: Strategy) -> list[Variant]:
-    return [Variant(s, p, dv) for s in strategy.signals for p in strategy.picks
-            for dv in strategy.min_dollar_volume]
+    return [Variant(s, p, dv, pool) for s in strategy.signals for p in strategy.picks
+            for dv in strategy.min_dollar_volume for pool in strategy.pools]
 
 
 # --- the context: arrays, schedule, universes ---------------------------------------
@@ -231,6 +237,9 @@ def replay(ctx: Context, strategy: Strategy, variant: Variant, dates: list[int],
               & (ctx.dollar_volume(i)[cols] >= variant.min_dollar_volume)
               & ~np.isnan(ctx.O[i + 1, cols]))
         cols = cols[ok]
+        if variant.pool and cols.size > variant.pool:
+            dv = ctx.dollar_volume(i)[cols]
+            cols = cols[np.argsort(-dv, kind="stable")[:variant.pool]]
         score = _signal(ctx, variant.signal, i, seed)[cols]
         keep = ~np.isnan(score)
         cols, score = cols[keep], score[keep]
