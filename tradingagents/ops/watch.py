@@ -56,8 +56,13 @@ def edge() -> str:
     config = _config()
     review = screen_review()
     verdict_line = review.split("## Verdict", 1)[-1].strip().splitlines()
+    from tradingagents.screener.review import market_split
+
     first = verdict_line[0].replace("**", "") if verdict_line else "No screens yet."
     lines = ["Weekly edge report", "", first]
+    split = market_split(config)
+    if split:
+        lines.append(split.sentence())
     for t in load_trials(config):
         if t.status != "active":
             continue

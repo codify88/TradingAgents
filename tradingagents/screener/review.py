@@ -126,6 +126,14 @@ def _pct_field(value) -> float:
         return float("nan")
 
 
+# What the operator is ultimately trying to beat. Each mandate grades against its
+# own benchmark (IWD for value) so a style's decisions are judged fairly; the
+# market view sits beside it, and the random controls split the difference into
+# style and selection: picks - market = (controls - market) + (picks - controls).
+MARKET = "SPY"
+MARKET_LABEL = "S&P 500"
+
+
 def benchmark_return(symbol: str, date: str, holding_days: int) -> float:
     """Total return of ``symbol`` over ``holding_days`` trading days from ``date``.
 
@@ -158,7 +166,10 @@ def _alpha(entry: dict, benchmark: str | None = None) -> float:
     holding = str(entry.get("holding") or "").rstrip("d")
     if math.isnan(raw) or not holding.isdigit():
         return float("nan")
-    bench = benchmark_return(benchmark, entry["date"], int(holding))
+    try:
+        bench = benchmark_return(benchmark, entry["date"], int(holding))
+    except Exception:  # an unreachable vendor leaves the figure blank, not the report broken
+        return float("nan")
     return float("nan") if math.isnan(bench) else raw - bench
 
 
@@ -225,13 +236,48 @@ def score_manifest(manifest: ScreenManifest, *logs: TradingMemoryLog,
     )
 
 
+@dataclass
+class MarketSplit:
+    """Picks against the market, split by the controls into style and selection."""
+
+    screens: int
+    picks: float
+    controls: float
+
+    @property
+    def selection(self) -> float:
+        return self.picks - self.controls
+
+    def sentence(self) -> str:
+        return (f"Against the {MARKET_LABEL} ({MARKET}), across {self.screens} screen(s): picks "
+                f"{_pct(self.picks)} = style and universe {_pct(self.controls)} (the random controls) "
+                f"+ selection {_pct(self.selection)} (picks minus controls).")
+
+
+def market_split(config: dict, mandate: str | None = None) -> MarketSplit | None:
+    """Across screens where both arms have settled against the market, or None."""
+    logs = decision_logs(config)
+    picks, controls = [], []
+    for manifest in load_manifests(config, mandate):
+        p, c = score_manifest(manifest, *logs, benchmark=MARKET)
+        if p.measurable and c.measurable:
+            picks.append(p.mean_alpha)
+            controls.append(c.mean_alpha)
+    if not picks:
+        return None
+    return MarketSplit(len(picks), sum(picks) / len(picks), sum(controls) / len(controls))
+
+
 def render_performance(config: dict, mandate: str | None = None,
-                       benchmark: str | None = None) -> str:
+                       benchmark: str | None = None, market: str | None = MARKET) -> str:
     """Picks against controls across every saved screen, once outcomes settle.
 
     ``benchmark`` regrades every cell against another index (IWD for a value
     screen, whose alpha against SPY mostly measures the style, not the picks).
+    ``market`` adds two columns and a verdict line against the index the operator
+    is trying to beat, split into style and selection; None leaves them out.
     """
+    show_market = bool(market) and market != benchmark
     manifests = load_manifests(config, mandate)
     if not manifests:
         return "No screens have been run yet."
@@ -251,9 +297,12 @@ def render_performance(config: dict, mandate: str | None = None,
         (f"Alpha is measured against {benchmark}." if benchmark else
          "Alpha is measured against each mandate's own benchmark, as logged."),
         "",
-        "| Screen | Style | As of | Picks | Picks α | Control | Control α | Edge |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Screen | Style | As of | Picks | Picks α | Control | Control α | Edge |"
+        + (f" Picks vs {MARKET_LABEL} | Control vs {MARKET_LABEL} |" if show_market else ""),
+        "|---|---|---|---|---|---|---|---|" + ("---|---|" if show_market else ""),
     ]
+    market_totals = {"picks": [], "control": []}
+    unpaired = 0
     totals = {"picks": [], "control": []}
     for manifest in manifests:
         picks, control = score_manifest(manifest, *logs, benchmark=benchmark)
@@ -265,39 +314,62 @@ def render_performance(config: dict, mandate: str | None = None,
         # run_id is the manifest filename.
         short_id = manifest.run_id.rsplit("_", 1)[-1]
         style = (manifest.mandate or "none").removeprefix("equity_")
-        lines.append(
+        row = (
             f"| {short_id} | {style} | {manifest.as_of} "
             f"| {picks.settled}/{len(picks.symbols)} | {_pct(picks.mean_alpha)} "
             f"| {control.settled}/{len(control.symbols)} | {_pct(control.mean_alpha)} | {edge} |"
         )
-        if picks.measurable:
+        if show_market:
+            mp, mc = score_manifest(manifest, *logs, benchmark=market)
+            row += f" {_pct(mp.mean_alpha)} | {_pct(mc.mean_alpha)} |"
+            if mp.measurable and mc.measurable:
+                market_totals["picks"].append(mp.mean_alpha)
+                market_totals["control"].append(mc.mean_alpha)
+        lines.append(row)
+        # Paired: a screen counts only when both arms have settled. Averaging the
+        # picks over every screen with settled picks against the controls over the
+        # fewer screens with settled controls compared different windows -- it once
+        # reported a +12.2% edge where the two comparable screens were -23.3% and -5.8%.
+        if picks.measurable and control.measurable:
             totals["picks"].append(picks.mean_alpha)
-        if control.measurable:
             totals["control"].append(control.mean_alpha)
+        elif picks.measurable:
+            unpaired += 1
 
     lines += ["", "## Verdict", ""]
-    if not totals["picks"]:
+    if not totals["picks"] and unpaired:
+        lines.append(
+            f"Picks have settled on {unpaired} screen(s) but their controls have not. Until both "
+            "arms settle on the same screen, the picks' return is not evidence about the screen: "
+            "it is a statement about the market over that window."
+        )
+    elif not totals["picks"]:
         horizon_note = (
             "Nothing has settled yet. A long-horizon mandate is supposed to be "
-            "silent for a while -- equity_value grades at two years -- so check "
+            "silent for a while -- equity_value grades at three years -- so check "
             "the interim reviews in the decision log rather than waiting here."
         )
         lines.append(horizon_note)
-    elif not totals["control"]:
-        lines.append(
-            "Picks have settled but no controls have. Until both arms settle, "
-            "the picks' return is not evidence about the screen: it is a "
-            "statement about the market over that window."
-        )
     else:
         p = sum(totals["picks"]) / len(totals["picks"])
         c = sum(totals["control"]) / len(totals["control"])
         lines.append(
-            f"Across {len(totals['picks'])} screen(s), picks averaged "
+            f"Across {len(totals['picks'])} screen(s) where both arms have settled, picks averaged "
             f"**{_pct(p)}** alpha against **{_pct(c)}** for the controls "
             f"(edge **{_pct(p - c)}**)."
+            + (f" {unpaired} more screen(s) have settled picks but not controls, and are left out."
+               if unpaired else "")
         )
         n = len(totals["picks"])
+        lines.append("")
+        if show_market and market_totals["picks"]:
+            split = MarketSplit(len(market_totals["picks"]),
+                                sum(market_totals["picks"]) / len(market_totals["picks"]),
+                                sum(market_totals["control"]) / len(market_totals["control"]))
+            lines += [split.sentence(),
+                      "", "The selection term is the agents' and the ranking's contribution; the style "
+                      "term says whether the mandate's universe itself beat the market. A style term "
+                      "that stays negative questions the mandate, not the agents."]
         lines.append("")
         lines.append(
             f"With {n} screen(s) this is directional, not significant -- a handful "

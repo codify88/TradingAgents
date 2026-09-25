@@ -337,6 +337,61 @@ class TestPerformanceReview:
         picks, _ = score_manifest(_manifest(["ZZZ"], []), _Log([]))
         assert picks.pending == 1
 
+    def test_the_market_view_splits_picks_into_style_and_selection(self, tmp_path, monkeypatch):
+        """picks - market = (controls - market) + (picks - controls): the controls
+        tell a style that lagged the market apart from picks that added nothing."""
+        from tradingagents.agents.utils.memory import TradingMemoryLog
+        from tradingagents.screener import review
+
+        monkeypatch.setattr(review, "benchmark_return", lambda sym, d, h: 0.10)  # the market made 10%
+        config = {"results_dir": str(tmp_path), "memory_log_path": str(tmp_path / "live.md")}
+        mf.save_manifest(_manifest(["AAA"], ["BBB"]), config)
+        sweep = TradingMemoryLog({"memory_log_path": str(tmp_path / "backtest" / "s1" / "trading_memory.md")})
+        for ticker, raw in (("AAA", 0.06), ("BBB", -0.04)):   # picks +6% raw, controls -4% raw
+            sweep.store_decision(ticker, "2026-09-17", "Rating: Buy", mandate="equity_momentum")
+            sweep.update_with_outcome(ticker, "2026-09-17", raw, raw - 0.02, 126, "noted",
+                                      resolution_date="2027-03-19", mandate="equity_momentum")
+        split = review.market_split(config)
+        assert split.screens == 1
+        assert split.picks == pytest.approx(-0.04) and split.controls == pytest.approx(-0.14)
+        assert split.selection == pytest.approx(0.10)
+        out = render_performance(config)
+        assert "Picks vs S&P 500" in out and "| -4.0% | -14.0% |" in out
+        assert "style and universe -14.0%" in out and "selection +10.0%" in out
+        assert "S&P 500" not in render_performance(config, market=None)
+
+    def test_the_verdict_compares_only_screens_where_both_arms_settled(self, tmp_path, monkeypatch):
+        """It once averaged picks over five screens against controls over two and
+        reported a +12.2% edge where the two comparable screens were -23.3% and -5.8%."""
+        from tradingagents.agents.utils.memory import TradingMemoryLog
+
+        config = {"results_dir": str(tmp_path), "memory_log_path": str(tmp_path / "live.md")}
+        paired = _manifest(["AAA"], ["BBB"])
+        picks_only = mf.ScreenManifest(**{**paired.__dict__, "run_id": "2026-09-16_equity_momentum_r2",
+                                          "as_of": "2026-09-16", "created": "2026-09-16T10:00:00"})
+        mf.save_manifest(paired, config)
+        mf.save_manifest(picks_only, config)
+        sweep = TradingMemoryLog({"memory_log_path": str(tmp_path / "backtest" / "s1" / "trading_memory.md")})
+        for ticker, day, alpha in (("AAA", "2026-09-17", -0.10), ("BBB", "2026-09-17", 0.05),
+                                   ("AAA", "2026-09-16", 0.90)):   # a big picks-only win must not count
+            sweep.store_decision(ticker, day, "Rating: Buy", mandate="equity_momentum")
+            sweep.update_with_outcome(ticker, day, alpha, alpha, 126, "noted",
+                                      resolution_date="2027-03-19", mandate="equity_momentum")
+        out = render_performance(config, market=None)
+        assert "Across 1 screen(s) where both arms have settled" in out
+        assert "edge **-15.0%**" in out
+        assert "1 more screen(s) have settled picks but not controls" in out
+
+    def test_an_unreachable_market_series_leaves_the_column_blank(self, tmp_path, monkeypatch):
+        from tradingagents.screener import review
+
+        def boom(*a):
+            raise RuntimeError("vendor down")
+
+        monkeypatch.setattr(review, "benchmark_return", boom)
+        entry = {"raw": "+5.0%", "holding": "126d", "date": "2026-09-17"}
+        assert math.isnan(review._alpha(entry, "SPY"))
+
     def test_the_report_refuses_a_verdict_until_both_arms_settle(self, tmp_path):
         config = {"results_dir": str(tmp_path), "memory_log_path": str(tmp_path / "log.md")}
         mf.save_manifest(_manifest(["AAA"], ["BBB"]), config)
@@ -536,7 +591,7 @@ class TestReviewReadsWhereOutcomesLand:
                                       resolution_date="2027-03-19", mandate="equity_momentum")
 
         assert len(decision_logs(config)) == 2
-        out = render_performance(config)
+        out = render_performance(config, market=None)
         assert "| r1 | momentum | 2026-09-17 | 1/1 | +5.0% | 1/1 | -1.0% | +6.0% |" in out
 
 

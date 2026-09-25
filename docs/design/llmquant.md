@@ -488,7 +488,7 @@ a `NOTICE` entry.
 | Lessons used beyond the PM | Roles that receive point-in-time lessons | Portfolio Manager only |
 | Prepared for future ideas | Datasets harvested with a point-in-time rule; weeks of holdings snapshots on disk; transcript backfill coverage | None harvested; holdings history cannot be recovered from the vendor |
 | More strategies, honestly tested | Candidates taken through controlled screens; promoted vs archived, with trial counts | 3 mandates, all written by hand |
-| Better calls | Edge over controls in `screen-review`, by mandate and overlay | +22.5% across 5 screens, most with 1-2 cells settled: not yet evidence |
+| Better calls | Edge over controls in `screen-review`, by mandate and overlay, and the S&P 500 split into style and selection | Value: -14.5% across the 2 screens where both arms have settled (an earlier +22.5% averaged unpaired screens and was wrong): not yet evidence |
 
 The last row is what everything else is for, and it is the one no layer can
 promise. The layers make runs cheaper and repeatable, so more screens settle
