@@ -19,7 +19,9 @@ they differ.
 | 3 | F value-lenses overlay | built; trial value-lenses-1 on 7 screens (2019-09 to 2023-03), 3 names a night from 2026-09-26 |
 | 3 | G playbook distill + evidence gate | built; first real dry run: 5 eligible value rules; runs Sundays |
 | 3 | H approval-gated actions, watchers, stay-awake agent | built; approval prompt verified, 4 watchers scheduled |
-| 4-5 | I-K | not started |
+| tuning | benchmark ladder (`tradingagents attribution`) | built; value selection +35.6% on 8 screens, agents -21.4% on 2 |
+| go-live | standard to paper first; value and momentum tuned in parallel | planned in `go-live.md`; phase 1 started |
+| 4-5 | I-K | not started; after go-live phases 1-3 |
 
 ## What the two designs share
 
