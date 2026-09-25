@@ -16,7 +16,10 @@ they differ.
 | 2 | C harvest, graph, point-in-time tools | built; first run 2026-09-26 after the nightly job (25,000 requests) |
 | 2 | D evaluation harness + nightly queue (5 names: 2 backlog, 3 trials) | built; no trial registered yet |
 | 2 | E exit-rule study | built; first run: holding beat every exit for value (12 calls) and momentum-LEAPS (21) |
-| 3-5 | F-K | not started |
+| 3 | F value-lenses overlay | built; trial value-lenses-1 on 7 screens (2019-09 to 2023-03), 3 names a night from 2026-09-26 |
+| 3 | G playbook distill + evidence gate | built; first real dry run: 5 eligible value rules; runs Sundays |
+| 3 | H approval-gated actions, watchers, stay-awake agent | built; approval prompt verified, 4 watchers scheduled |
+| 4-5 | I-K | not started |
 
 ## What the two designs share
 
