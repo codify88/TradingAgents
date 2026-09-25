@@ -412,10 +412,16 @@ def alpha_vantage_daily_strict(symbol: str) -> pd.DataFrame:
     the process. Callers that can retry, or that must tell an outage from a
     dead company, use this.
     """
+    return parse_daily_body(_daily_csv(symbol.strip().upper()))
+
+
+def parse_daily_body(body) -> pd.DataFrame:
+    """A TIME_SERIES_DAILY_ADJUSTED CSV body as the frame :func:`alpha_vantage_daily_strict`
+    returns; empty for a JSON ("no such symbol") body. Separate so a caller holding
+    a stored body (the harvest's universe) can read it without a request."""
     import csv
     import io
 
-    body = _daily_csv(symbol.strip().upper())
     if not isinstance(body, str) or body.lstrip().startswith("{"):
         return pd.DataFrame()  # a JSON body here is "no such symbol", an answer
     rows = list(csv.DictReader(io.StringIO(body)))

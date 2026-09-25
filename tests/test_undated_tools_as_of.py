@@ -53,13 +53,16 @@ def test_yfinance_insider_without_a_date_is_unfiltered():
 
 @pytest.mark.unit
 def test_alpha_vantage_insider_filings_after_the_date_are_dropped():
+    """A trade is public when its Form 4 is due, two business days later: on
+    Sunday 2025-06-01, Thursday's trade was public and Friday's may not be."""
     body = json.dumps({"data": [
         {"transaction_date": "2026-09-08", "executive": "A"},
-        {"transaction_date": "2025-05-30", "executive": "B"},
+        {"transaction_date": "2025-05-30", "executive": "FRIDAY"},
+        {"transaction_date": "2025-05-29", "executive": "THURSDAY"},
     ]})
     with mock.patch.object(alpha_vantage_news, "_make_api_request", return_value=body):
         out = json.loads(alpha_vantage_news.get_insider_transactions("AAPL", "2025-06-01"))
-    assert [t["executive"] for t in out["data"]] == ["B"]
+    assert [t["executive"] for t in out["data"]] == ["THURSDAY"]
 
 
 @pytest.mark.unit

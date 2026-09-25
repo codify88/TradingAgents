@@ -210,10 +210,19 @@ def recent_decisions(hours: int = 24) -> str:
     return "\n".join(lines)
 
 
+def harvest_status() -> str:
+    """How far the harvest's backfill has got: holdings, earnings calendars,
+    insider and congressional trades, ETF profiles, transcripts."""
+    from tradingagents.harvest.run import status
+
+    return status(_config())
+
+
 def morning_report() -> str:
-    """The 08:00 message: last night's run, what it decided, and reviews due this
-    week. Deterministic: no model writes it, so it cannot misreport."""
-    parts = [nightly_status(), recent_decisions(24), pending_reviews(7)]
+    """The 08:00 message: last night's run, what it decided, reviews due this
+    week, and the harvest's progress. Deterministic: no model writes it, so it
+    cannot misreport."""
+    parts = [nightly_status(), recent_decisions(24), pending_reviews(7), harvest_status()]
     text = "\n\n".join(parts)
     # Telegram's limit is 4,096 characters per message.
     return text if len(text) <= 3900 else text[:3900] + "\n[... cut; ask for details]"
@@ -257,4 +266,4 @@ def data_store_stats(day: str | None = None) -> str:
 
 
 READ_TOOLS = (nightly_status, recent_decisions, screen_review, list_decisions, get_report,
-              pending_reviews, data_store_stats)
+              pending_reviews, data_store_stats, harvest_status)

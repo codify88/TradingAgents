@@ -18,6 +18,12 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .ownership import (
+    get_congress_trades as get_ownership_congress_trades,
+    get_earnings_call as get_ownership_earnings_call,
+    get_etf_exposure as get_ownership_etf_exposure,
+    get_institutional_holdings as get_ownership_institutional_holdings,
+)
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .sec_edgar import (
     get_balance_sheet as get_sec_edgar_balance_sheet,
@@ -74,6 +80,15 @@ TOOLS_CATEGORIES = {
             "get_macro_indicators",
         ]
     },
+    "ownership_data": {
+        "description": "Point-in-time congressional trades, institutional and ETF holdings, earnings calls",
+        "tools": [
+            "get_congress_trades",
+            "get_institutional_holdings",
+            "get_etf_exposure",
+            "get_earnings_call",
+        ]
+    },
     "prediction_markets": {
         "description": "Market-implied probabilities for forward-looking events",
         "tools": [
@@ -95,7 +110,7 @@ VENDOR_LIST = [
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
 # key, or a network blip should not crash an analysis over flavour data). Core
 # categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
+OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "ownership_data"}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -146,6 +161,11 @@ VENDOR_METHODS = {
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
     },
+    # ownership_data (harvested; docs/design/llmquant.md)
+    "get_congress_trades": {"alpha_vantage": get_ownership_congress_trades},
+    "get_institutional_holdings": {"alpha_vantage": get_ownership_institutional_holdings},
+    "get_etf_exposure": {"alpha_vantage": get_ownership_etf_exposure},
+    "get_earnings_call": {"alpha_vantage": get_ownership_earnings_call},
     # prediction_markets
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,

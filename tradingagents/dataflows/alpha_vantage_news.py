@@ -86,6 +86,12 @@ def get_insider_transactions(symbol: str, curr_date: str | None = None) -> dict[
     response = _make_api_request("INSIDER_TRANSACTIONS", params)
     if not curr_date:
         return response
+    # A Form 4 is due two business days after the trade and the vendor reports
+    # no filing date, so a trade was public on curr_date only if it happened two
+    # business days earlier (tradingagents.harvest.datasets).
+    from tradingagents.harvest.datasets import insider_cutoff
+
+    cutoff = insider_cutoff(curr_date)
     payload = json.loads(response)
-    payload["data"] = [t for t in payload["data"] if t["transaction_date"] <= curr_date]
+    payload["data"] = [t for t in payload["data"] if t["transaction_date"] <= cutoff]
     return json.dumps(payload)

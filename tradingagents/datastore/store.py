@@ -44,11 +44,16 @@ CREATE TABLE IF NOT EXISTS snapshot (
 );
 
 CREATE TABLE IF NOT EXISTS node (id TEXT PRIMARY KEY, kind TEXT NOT NULL, attrs TEXT);
+-- ``ref`` tells apart two facts of one kind on one day (an insider's two Form 4
+-- rows): the digest of the row the edge came from.
 CREATE TABLE IF NOT EXISTS edge (
     src TEXT NOT NULL, dst TEXT NOT NULL, kind TEXT NOT NULL,
-    as_of TEXT NOT NULL, available_at TEXT, source TEXT, attrs TEXT,
-    PRIMARY KEY (src, dst, kind, as_of)
+    as_of TEXT NOT NULL, ref TEXT NOT NULL DEFAULT '',
+    available_at TEXT, source TEXT, attrs TEXT,
+    PRIMARY KEY (src, dst, kind, as_of, ref)
 );
+CREATE INDEX IF NOT EXISTS edge_dst ON edge (dst, kind, available_at);
+CREATE INDEX IF NOT EXISTS edge_src ON edge (src, kind);
 
 CREATE TABLE IF NOT EXISTS request_count (
     day TEXT NOT NULL, vendor TEXT NOT NULL, endpoint TEXT NOT NULL,
@@ -80,8 +85,19 @@ class DataStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
-        with self._conn() as conn:
-            conn.executescript(SCHEMA)
+        conn = self._conn()
+        self._migrate(conn)
+        conn.executescript(SCHEMA)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """The first edge table had no ``ref``; it was never written, so it is
+        rebuilt. A populated one would need a real migration and is refused."""
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(edge)")]
+        if cols and "ref" not in cols:
+            if conn.execute("SELECT COUNT(*) FROM edge").fetchone()[0]:
+                raise RuntimeError("edge table predates `ref` and holds rows; migrate it by hand")
+            conn.execute("DROP TABLE edge")
 
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
@@ -120,6 +136,12 @@ class DataStore:
              gzip.compress(body.encode("utf-8"))),
         )
 
+    def stored(self, vendor: str, endpoint: str, key: str) -> tuple[str, datetime] | None:
+        """The stored body and when it was fetched, whatever its age -- for
+        callers with their own schedule (the harvest's weekly refreshes)."""
+        row = self.get(vendor, endpoint, key)
+        return None if row is None else (row[0], row[1])
+
     # -- snapshots ---------------------------------------------------------
 
     def snapshot(self, vendor: str, endpoint: str, key: str, body: str, *,
@@ -143,6 +165,12 @@ class DataStore:
             (vendor, endpoint, key, symbol, fetched_on, digest, payload, same_as),
         )
 
+    def last_snapshot_day(self, vendor: str, endpoint: str, key: str) -> str | None:
+        row = self._conn().execute(
+            "SELECT MAX(fetched_on) FROM snapshot WHERE vendor=? AND endpoint=? AND params_key=?",
+            (vendor, endpoint, key)).fetchone()
+        return row[0] if row else None
+
     def snapshots(self, vendor: str, endpoint: str, key: str) -> list[tuple[str, str]]:
         """Every snapshot as (fetched_on, body), oldest first."""
         conn = self._conn()
@@ -154,6 +182,50 @@ class DataStore:
         bodies = {r[0]: r[1] for r in rows if r[1] is not None}
         return [(on, gzip.decompress(payload if payload is not None else bodies[same_as]).decode("utf-8"))
                 for on, payload, same_as in rows]
+
+    # -- the graph ---------------------------------------------------------
+
+    def upsert_node(self, node_id: str, kind: str, attrs: dict | None = None) -> None:
+        self._conn().execute("INSERT OR REPLACE INTO node VALUES (?,?,?)",
+                             (node_id, kind, json.dumps(attrs or {}, sort_keys=True)))
+
+    def upsert_nodes(self, rows: list[tuple[str, str, dict | None]]) -> None:
+        """Rows of (id, kind, attrs), in one transaction."""
+        conn = self._conn()
+        conn.execute("BEGIN")
+        try:
+            conn.executemany("INSERT OR REPLACE INTO node VALUES (?,?,?)",
+                             [(i, k, json.dumps(a or {}, sort_keys=True)) for i, k, a in rows])
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    def upsert_edges(self, rows: list[tuple]) -> None:
+        """Rows of (src, dst, kind, as_of, ref, available_at, source, attrs dict)."""
+        conn = self._conn()
+        conn.execute("BEGIN")
+        try:
+            conn.executemany(
+                "INSERT OR REPLACE INTO edge VALUES (?,?,?,?,?,?,?,?)",
+                [(s, d, k, a, r, av, src, json.dumps(at or {}, sort_keys=True))
+                 for s, d, k, a, r, av, src, at in rows])
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    def edges_to(self, dst: str, kind: str, available_by: str | None = None) -> list[dict]:
+        """Edges into ``dst`` of ``kind``, only those public by ``available_by``."""
+        sql = ("SELECT src, as_of, available_at, attrs FROM edge WHERE dst=? AND kind=?"
+               + (" AND available_at <= ?" if available_by else "") + " ORDER BY as_of")
+        args = (dst, kind, available_by) if available_by else (dst, kind)
+        return [{"src": s, "as_of": a, "available_at": av, **json.loads(at or "{}")}
+                for s, a, av, at in self._conn().execute(sql, args)]
+
+    def node(self, node_id: str) -> dict | None:
+        row = self._conn().execute("SELECT kind, attrs FROM node WHERE id=?", (node_id,)).fetchone()
+        return None if row is None else {"id": node_id, "kind": row[0], **json.loads(row[1] or "{}")}
 
     # -- counters and stats ------------------------------------------------
 

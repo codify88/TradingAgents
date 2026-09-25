@@ -1591,6 +1591,27 @@ def schedule_export(
     console.print(f"Wake schedule written to {export(Path(path))}")
 
 
+@app.command(name="harvest")
+def harvest_command(
+    max_requests: int = typer.Option(25_000, "--max-requests", help="Stop after this many vendor requests."),
+    stop_at: str = typer.Option(None, "--stop-at", help="HH:MM: stop by then (the nightly job passes 07:30)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count what is due without requesting it."),
+):
+    """Pull transcripts, insider and congressional trades, and holdings ahead of need."""
+    from tradingagents.harvest.run import run
+
+    report = run(max_requests, stop_at=stop_at, dry_run=dry_run)
+    print(("[dry run] " if dry_run else "") + report.render())
+
+
+@app.command(name="harvest-status")
+def harvest_status_command():
+    """Show how far the harvest's backfill has got, dataset by dataset."""
+    from tradingagents.harvest.run import status
+
+    print(status())
+
+
 @app.command(name="morning-report")
 def morning_report_command():
     """Print the 08:00 report: last night's run, new decisions, reviews due this week."""

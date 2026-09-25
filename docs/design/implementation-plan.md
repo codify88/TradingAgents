@@ -146,6 +146,44 @@ quarter end); empty answers recorded and not re-asked; dedup; budget respected.
 Tools are registered but not given to any analyst yet: which role gets which
 tool is a mandate decision, made in wave 3 or later.
 
+#### Backfill, measured 2026-09-25
+
+A probe of 60 random names from the screener's own universe, through the store:
+28 passed the price tier (so ~2,590 names, matching the screen's 2,592);
+survivors have 56.9 reported quarters since 2010 on average (10 to 67); about
+70% of those quarters have a transcript (22/28 recent, 21/28 five years back,
+18/28 twelve years back). Transcript quarters are the company's **fiscal**
+quarters (checked on AAPL: its "2025Q1" is the December 2024 quarter). The
+listing holds 5,875 ETFs.
+
+| First pass (once) | Requests | Disk |
+|---|---|---|
+| Transcripts, 2,592 names x 56.9 quarters (empty answers cost a request too) | ~147,500 | ~1.55 GB |
+| `EARNINGS` + `OVERVIEW` per name (to date and label each transcript) | ~5,200 | small |
+| Insider, congressional and institutional, one per name each | ~7,800 | ~0.3 GB |
+| `ETF_PROFILE`, all 5,875 once | ~5,900 | ~40 MB |
+| **Total** | **~166,000** | **~1.9 GB** |
+
+Maintenance, about 14,000 requests a week (~2,000 a night, ~14 minutes):
+holdings snapshots weekly; the 500 largest ETFs by net assets weekly and the
+rest monthly; insider and congressional trades weekly (daily for decided
+names); `EARNINGS` weekly, to learn report dates; each new transcript once its
+call has happened; `OVERVIEW` quarterly.
+
+The window: the throttle admits 147 a minute, so the screen's ~5,400 price
+histories take ~37 minutes and the harvest starts around 03:15; the Mac must be
+awake for the 07:55 wake, so a run stops at 07:30 whatever its budget.
+
+| Pace | Harvest ends | Transcripts to 2023 | To 2019 | Complete |
+|---|---|---|---|---|
+| **25,000/night (decided)** | ~06:10 | ~night 3 | ~night 5 | **~8 nights** |
+| 10,000/night | ~04:25 | ~night 7 | ~night 12 | ~21 nights |
+
+Order, at any pace: holdings snapshots first (they cannot be backfilled), then
+the `EARNINGS`/`OVERVIEW` that schedule transcripts, insider and congressional
+trades, then every quarter for the ~150 names in saved screens and decisions,
+then all names newest quarter first.
+
 Done when holdings snapshots run weekly, trades refresh, the transcript
 backfill advances within budget, and a historical query returns only rows
 public by its date.
@@ -238,7 +276,7 @@ Nothing reaches an agent in this wave.
 |---|---|---|
 | 1 | Does your Alpha Vantage premium agreement allow keeping responses in a permanent local store for personal research? | **Decided 2026-09-25: yes.** `final` rows are kept permanently, with no expiry |
 | 2 | Your plan's requests-per-minute limit (for the throttle) | **Decided 2026-09-25: 150/min**, one bucket shared by the nightly run, the harvest and agents mid-run. A 10,000-request harvest takes about 67 minutes |
-| 3 | Harvest scope and disk | **Decided 2026-09-25:** tier-1 survivors (~2,600) + adjudicated names; transcripts newest first; no disk ceiling (use what is needed). The limit is 10,000 requests a night after the nightly run (~67 min at 150/min); store size stays in the nightly log (A.7) |
+| 3 | Harvest scope and disk | **Decided 2026-09-25:** tier-1 survivors (~2,600) + adjudicated names; transcripts newest first; no disk ceiling (use what is needed). Pace amended 2026-09-25 after measuring the backfill (below): **25,000 requests a night until the first pass completes (~8 nights), then maintenance, about 2,000 a night**; store size stays in the nightly log (A.7) |
 | 4 | Promotion bar for every candidate | **Decided 2026-09-25, provisional:** at least 4 screens with at least 5 settled cells per side each; candidate beats base in at least 3 of 4; +1 screen per 5 trials in the same style. Revisit if nothing clears for months while cells settle (too strict) or promoted candidates stop beating base on later screens (too loose) |
 | 5 | Nightly budget split | **Decided 2026-09-25:** `--max-names 5`: 2 backlog, 3 experiments. Backlog pace unchanged; the nightly run gets longer (about 40 minutes of adjudication instead of 25), so the harvest starts later |
 | 6 | Messaging channel for Hermes | **Decided and set up 2026-09-25: Telegram.** Private channel; bot is a channel admin that can post (test message delivered); `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are in `.env`, which git ignores. Nothing outstanding for B.4 |
