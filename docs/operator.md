@@ -7,12 +7,14 @@ so it can be rebuilt or checked. Set up 2026-09-25.
 
 | Piece | Where | What it does |
 |---|---|---|
-| MCP server | `tradingagents mcp serve` (optional `mcp` install) | Seven read-only tools: `nightly_status`, `recent_decisions`, `screen_review`, `list_decisions`, `get_report`, `pending_reviews`, `data_store_stats`. None takes a path or config; none returns a key. |
+| MCP server | `tradingagents mcp serve` (optional `mcp` install) | Nine read-only tools (`nightly_status`, `recent_decisions`, `screen_review`, `list_decisions`, `get_report`, `pending_reviews`, `data_store_stats`, `harvest_status`, `job_status`) and two actions, `screen_run` (at most 5 names) and `retry_failed`. Actions run as detached jobs and are refused 01:30-07:30 and while another run is going. None takes a path or config; none returns a key. |
 | Hermes | `~/.hermes/hermes-agent`, pinned at `59004a6` (detached) | The agent runtime. Installed with its own installer: `--commit 59004a62356f… --skip-setup --skip-browser`. |
 | Operator profile | `~/.hermes/profiles/tradeops` | Claude Haiku 4.5 via the Anthropic API; the only toolset on CLI and Telegram is `mcp-trade-agents`. Every built-in toolset -- terminal, file, browser, web, memory, cron -- is off. |
 | Host gateway | LaunchAgent `com.jeremysmith.tradingagents.hermes` (`hermes gateway run --external-supervisor`, KeepAlive) | Hermes runs one gateway per machine; it serves every profile's platforms. Only `tradeops` has one (Telegram); the default profile has none, so nothing inbound reaches it. |
 | Morning report | Hermes cron job `morning-report`, `0 8 * * *`, in `tradeops` | Runs `scripts/morning-report.sh` -> `tradingagents morning-report` and posts the output verbatim to the channel (`--no-agent`). No model writes it, so it cannot misreport. |
-| Wake | the platform wake daemon (07:55) | The Mac is awake when the 08:00 job fires. |
+| Watchers | Hermes cron jobs `watch-earnings` (08:05 daily), `watch-ownership` (08:10 daily), `watch-reviews` (08:05 Mondays), `watch-edge` (08:10 Mondays) | Each runs `tradingagents watch <name>` (`--no-agent`) and is silent when there is nothing to say. |
+| Approval | `trust: untrusted` on the `trade-agents` server in the profile's `config.yaml` | Hermes asks before every call of a tool not annotated read-only (the two actions). Without it, missing trust means full and nothing is asked. Checked: a one-shot request to start a screen run was stopped at the approval prompt and denied. |
+| Wake | the platform wake daemon (07:55) and the stay-awake agent (`com.jeremysmith.tradingagents.awake`, caffeinate 20 min from 01:56 and 07:56) | A scheduled wake alone may drop back to sleep within minutes; the stay-awake agent keeps the Mac up for the 02:00 run and the 08:00-08:10 jobs. |
 
 ## Secrets
 
@@ -46,9 +48,13 @@ it has no shell.
      trade-agents:
        command: /Users/jeremysmith/.local/bin/tradingagents
        args: [mcp, serve]
+       trust: untrusted          # the actions need approval
        sampling: {enabled: false}
    ```
 4. Put the four variables above in the profile's `.env`; `chmod 600` it.
 5. Copy `scripts/morning-report.sh` into the profile's `scripts/`, then
-   `hermes -p tradeops cron create "0 8 * * *" --name morning-report --no-agent --script morning-report.sh --deliver telegram`
+   `hermes -p tradeops cron create "0 8 * * *" --name morning-report --no-agent --script morning-report.sh --deliver telegram`.
+   For each watcher, a script `watch-<name>.sh` running `tradingagents watch <name>`, and
+   `hermes -p tradeops cron create "<schedule>" --name watch-<name> --no-agent --script watch-<name>.sh --deliver telegram`
+   with the schedules above.
 6. `sudo scripts/install-platform.sh` installs the gateway LaunchAgent.

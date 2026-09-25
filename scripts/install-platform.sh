@@ -82,6 +82,12 @@ if [ "$UNINSTALL" -eq 1 ]; then
     while read -r d t; do
         run pmset schedule cancel wake "$(date -j -f '%m/%d/%Y %H:%M:%S' "$d $t" '+%m/%d/%y %H:%M:%S')" tradingagents
     done
+    AWAKE_PLIST="$AGENTS/com.jeremysmith.tradingagents.awake.plist"
+    if [ -f "$AWAKE_PLIST" ]; then
+        say "removing the stay-awake agent"
+        run launchctl bootout "gui/$USER_UID" "$AWAKE_PLIST" 2>/dev/null || true
+        run rm -f "$AWAKE_PLIST"
+    fi
     if [ -f "$HERMES_PLIST" ]; then
         say "removing the Hermes gateway agent"
         run launchctl bootout "gui/$USER_UID" "$HERMES_PLIST" 2>/dev/null || true
@@ -118,6 +124,11 @@ say "installing the nightly agent (platform-run.sh: nightly, then harvest)"
 run mkdir -p "$AGENTS" "$USER_HOME/.tradingagents/logs/nightly"
 fill "$REPO/scripts/launchd/com.jeremysmith.tradingagents.nightly.plist" "$NIGHTLY_PLIST" "$USER_NAME"
 reload_agent "$NIGHTLY_PLIST"
+
+say "installing the stay-awake agent (holds sleep off 20 min after each scheduled wake)"
+AWAKE_PLIST="$AGENTS/com.jeremysmith.tradingagents.awake.plist"
+fill "$REPO/scripts/launchd/com.jeremysmith.tradingagents.awake.plist" "$AWAKE_PLIST" "$USER_NAME"
+reload_agent "$AWAKE_PLIST"
 
 HERMES_BIN="$(sudo -u "$USER_NAME" bash -lc 'command -v hermes' 2>/dev/null || true)"
 if [ -n "$HERMES_BIN" ]; then

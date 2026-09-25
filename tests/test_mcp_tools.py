@@ -113,10 +113,10 @@ def test_the_server_registers_every_read_tool_as_read_only():
 
     from tradingagents.mcp_server.server import build_server
 
-    listed = asyncio.run(build_server().list_tools())
-    names = {t.name for t in listed}
-    assert names == {fn.__name__ for fn in tools.READ_TOOLS}
-    assert all(t.annotations and t.annotations.read_only_hint for t in listed)
+    listed = {t.name: t for t in asyncio.run(build_server().list_tools())}
+    reads = {fn.__name__ for fn in tools.READ_TOOLS}
+    assert set(listed) == reads | {fn.__name__ for fn in tools.ACTION_TOOLS}
+    assert all(listed[n].annotations and listed[n].annotations.read_only_hint for n in reads)
 
 
 @pytest.mark.unit

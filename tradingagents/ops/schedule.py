@@ -32,8 +32,14 @@ class Job:
 
 JOBS: tuple[Job, ...] = (
     Job("nightly", time(2, 0), "screen, adjudicate, then harvest (scripts/platform-run.sh)"),
-    Job("morning-watchers", time(8, 0), "Hermes: nightly health, new decisions"),
+    Job("morning-watchers", time(8, 0),
+        "Hermes: 08:00 report; 08:05 earnings and reviews (Mondays); 08:10 ownership and edge (Mondays)"),
 )
+
+# A scheduled wake does not keep the Mac awake: after a wake from sleep macOS may
+# sleep again within minutes, before the job it woke for fires. The stay-awake
+# agent holds idle sleep off from one minute after each wake for this long.
+STAY_AWAKE_MINUTES = 20
 
 
 def next_run(job: Job, now: datetime) -> datetime:

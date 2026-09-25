@@ -265,5 +265,63 @@ def data_store_stats(day: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def job_status() -> str:
+    """The operator jobs started from here (screen runs, retries): running or finished, names run, failures."""
+    from tradingagents.ops import jobs
+
+    return jobs.status(_config())
+
+
+# -- actions: not read-only, so Hermes asks the operator before each call ------------
+
+
+def screen_run(screen_id: str, max_names: int = 3) -> str:
+    """Adjudicate up to ``max_names`` (at most 5) undecided names of a saved screen, in the
+    background. Refused in the night window or while another run is going."""
+    from tradingagents.ops import jobs
+    from tradingagents.screener import run as sr
+
+    n = max(1, min(int(max_names), jobs.MAX_NAMES))
+    try:
+        m = sr.find(_config(), screen_id)
+    except ValueError as exc:
+        return str(exc)
+    short = m.run_id.rsplit("_", 1)[-1]
+    return jobs.start(_config(), f"screen-run {short} ({n} names)", ["screen-run", short, "--max-names", str(n)])
+
+
+def retry_failed(day: str | None = None) -> str:
+    """Re-run the cells that failed in a night's run (default: the latest), up to 5, in the
+    background. Refused in the night window or while another run is going."""
+    from collections import Counter
+
+    from tradingagents.ops import jobs
+    from tradingagents.screener.manifest import load_manifests
+
+    log_dir = _results() / "nightly"
+    path = nightly_log.log_for(log_dir, date.fromisoformat(day)) if day else nightly_log.latest(log_dir)
+    if path is None:
+        return "No nightly run found."
+    run = nightly_log.parse(path)
+    if not run.failures:
+        return f"The {run.started:%Y-%m-%d} run had no failed cells."
+    screens = {m.run_id: m for m in load_manifests(_config())}
+    per_screen = Counter()
+    for ticker, as_of, _ in run.failures:
+        for m in screens.values():
+            if m.as_of == as_of and ticker in (m.pick_symbols + m.control_symbols):
+                per_screen[m.run_id] += 1
+                break
+    if not per_screen:
+        return "The failed cells do not belong to any saved screen."
+    run_id, n = per_screen.most_common(1)[0]
+    short = run_id.rsplit("_", 1)[-1]
+    msg = jobs.start(_config(), f"retry {short} ({min(n, jobs.MAX_NAMES)} names)",
+                     ["screen-run", short, "--max-names", str(min(n, jobs.MAX_NAMES))])
+    others = len(per_screen) - 1
+    return msg + (f" {others} other screen(s) also had failures; retry them after this one." if others else "")
+
+
 READ_TOOLS = (nightly_status, recent_decisions, screen_review, list_decisions, get_report,
-              pending_reviews, data_store_stats, harvest_status)
+              pending_reviews, data_store_stats, harvest_status, job_status)
+ACTION_TOOLS = (screen_run, retry_failed)

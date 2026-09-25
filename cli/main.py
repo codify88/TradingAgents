@@ -1820,6 +1820,23 @@ def learn_lessons(mandate: str = typer.Option(..., "--mandate")):
                   f"{len({x.ticker for x in lessons})} names.")
 
 
+@app.command(name="watch")
+def watch_command(
+    name: str = typer.Argument(..., help="reviews | edge | earnings | ownership"),
+):
+    """Print a watcher's message, or nothing when there is nothing to say (for Hermes jobs)."""
+    from tradingagents.ops import watch
+
+    fn = {"reviews": watch.reviews, "edge": watch.edge, "earnings": watch.earnings,
+          "ownership": watch.ownership}.get(name)
+    if fn is None:
+        console.print("[red]Watchers: reviews, edge, earnings, ownership[/red]")
+        raise typer.Exit(code=1)
+    text = fn()
+    if text:
+        print(text[:3900])
+
+
 @app.command(name="screen-review")
 def screen_review(
     mandate: str = typer.Option(
