@@ -221,16 +221,30 @@ def test_a_dry_run_asks_nothing_and_records_nothing(store, fake_vendor):
 # --- the graph ---------------------------------------------------------------------------------
 
 
+def _insider(day, name="Krishna, Arvind", shares="10", side="D", security="Common Stock"):
+    return {"transaction_date": day, "executive": name, "shares": shares,
+            "acquisition_or_disposal": side, "security_type": security}
+
+
 @pytest.mark.unit
-def test_insider_edges_are_public_two_business_days_later_and_same_day_trades_both_kept(store):
-    body = json.dumps({"data": [
-        {"transaction_date": "2026-09-25", "executive": "Krishna, Arvind", "shares": "10"},
-        {"transaction_date": "2026-09-25", "executive": "KRISHNA, ARVIND", "shares": "20"},
-    ]})
-    assert graph.fill_insider(store, "IBM", body) == 2
+def test_insider_edges_are_public_two_business_days_later_and_one_per_person_day_side(store):
+    body = json.dumps({"data": [_insider("2026-09-25", shares="10"), _insider("2026-09-25", "KRISHNA, ARVIND", "20"),
+                                _insider("2026-09-25", side="A", shares="5")]})
+    assert graph.fill_insider(store, "IBM", body, today="2026-09-26") == 2
     assert store.edges_to("ticker:IBM", "traded", "2026-09-28") == [], "not public until Tuesday"
-    assert len(store.edges_to("ticker:IBM", "traded", "2026-09-29")) == 2
+    edges = store.edges_to("ticker:IBM", "traded", "2026-09-29")
+    assert sorted((e["side"], e["shares"]) for e in edges) == [("A", 5.0), ("D", 30.0)]
     assert store.node("insider:KRISHNA ARVIND")["kind"] == "insider"
+
+
+@pytest.mark.unit
+def test_the_graph_keeps_recent_common_stock_trades_only(store):
+    body = json.dumps({"data": [
+        _insider("2026-09-01"), _insider("2026-09-01", security="Restricted Stock Units", name="Grant Holder"),
+        _insider("2026-09-01", security="Non-Qualified Stock Option (right to buy)", name="Option Holder"),
+        _insider("2020-01-02", name="Old Trade"), _insider("2026-09-02", security="Class A Common Stock", name="A B")]})
+    assert graph.fill_insider(store, "IBM", body, today="2026-09-26") == 2
+    assert {e["src"] for e in store.edges_to("ticker:IBM", "traded")} == {"insider:KRISHNA ARVIND", "insider:A B"}
 
 
 @pytest.mark.unit
@@ -319,17 +333,16 @@ def test_only_and_skip_restrict_the_stages(store, fake_vendor):
 def test_a_date_with_form_4_xml_glued_on_is_read_by_its_leading_date(store):
     """Seen in the first harvest for HD, JNJ and NTAP (2003 Form 4s)."""
     body = json.dumps({"data": [
-        {"transaction_date": "2003-08-26</value></transactionDate><transactionCoding>", "executive": "A B"},
-        {"transaction_date": "not a date", "executive": "C D"},
+        _insider("2025-08-26</value></transactionDate><transactionCoding>", name="A B"),
+        _insider("not a date", name="C D"),
     ]})
-    assert graph.fill_insider(store, "HD", body) == 1
-    assert store.edges_to("ticker:HD", "traded")[0]["as_of"] == "2003-08-26"
+    assert graph.fill_insider(store, "HD", body, today="2026-09-26") == 1
+    assert store.edges_to("ticker:HD", "traded")[0]["as_of"] == "2025-08-26"
 
 
 @pytest.mark.unit
 def test_the_graph_rebuilds_from_stored_responses_without_requests(store):
-    _put(store, "INSIDER_TRANSACTIONS", {"symbol": "IBM"},
-         {"data": [{"transaction_date": "2026-09-01", "executive": "X Y"}]})
+    _put(store, "INSIDER_TRANSACTIONS", {"symbol": "IBM"}, {"data": [_insider("2026-09-01", name="X Y")]})
     store.snapshot(ds.VENDOR, "INSTITUTIONAL_HOLDINGS", params_key({"symbol": "IBM"}),
                    json.dumps({"holdings": [{"holder_name": "FUND", "shares_held": "1", "last_reported": "2026-06-30"}]}),
                    symbol="IBM", fetched_on="2026-09-20")

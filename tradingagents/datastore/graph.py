@@ -57,20 +57,44 @@ def _ticker(symbol: str) -> str:
     return f"ticker:{symbol.upper()}"
 
 
-def fill_insider(store, symbol: str, body: str) -> int:
+# The raw responses keep every insider row, and the insider tool reads them
+# directly (two-business-day rule), so history needs no graph. The graph keeps
+# what cross-name questions and the ownership watcher use: common-stock trades,
+# one edge per person, day and side, for the last few years. All rows for 150
+# names were 528,000 edges -- 42% of them grants, options and phantom units.
+INSIDER_GRAPH_YEARS = 3
+_COMMON = re.compile(r"common|ordinary|class [a-c]\b|capital stock", re.I)
+
+
+def fill_insider(store, symbol: str, body: str, today: str | None = None) -> int:
+    import datetime as _dt
+
     rows = json.loads(body).get("data") or []
-    edges, nodes = [], {}
+    since = ((_dt.date.fromisoformat(today) if today else _dt.date.today())
+             - _dt.timedelta(days=365 * INSIDER_GRAPH_YEARS)).isoformat()
+    trades: dict[tuple, dict] = {}
+    nodes = {}
     for r in rows:
         name, day = normalise_name(r.get("executive", "")), clean_date(r.get("transaction_date"))
-        if not name or not day:
+        side = r.get("acquisition_or_disposal")
+        if not name or not day or day < since or side not in ("A", "D") \
+                or not _COMMON.search(r.get("security_type") or ""):
             continue
         person = f"insider:{name}"
         nodes[person] = (person, "insider", {"name": r.get("executive")})
-        edges.append((person, _ticker(symbol), "traded", day, _ref(r), insider_public(day),
-                      "INSIDER_TRANSACTIONS",
-                      {"title": r.get("executive_title"), "security": r.get("security_type"),
-                       "side": r.get("acquisition_or_disposal"), "shares": r.get("shares"),
-                       "price": r.get("share_price")}))
+        t = trades.setdefault((person, day, side), {"title": r.get("executive_title"), "shares": 0.0,
+                                                     "rows": 0, "price": r.get("share_price")})
+        try:
+            t["shares"] += float(r.get("shares") or 0)
+        except (TypeError, ValueError):
+            pass
+        t["rows"] += 1
+    conn = store._conn()
+    conn.execute("DELETE FROM edge WHERE dst=? AND source='INSIDER_TRANSACTIONS'", (_ticker(symbol),))
+    edges = [(person, _ticker(symbol), "traded", day, side, insider_public(day), "INSIDER_TRANSACTIONS",
+              {"title": t["title"], "side": side, "shares": round(t["shares"], 2), "price": t["price"],
+               "rows": t["rows"]})
+             for (person, day, side), t in trades.items()]
     store.upsert_nodes(list(nodes.values()))
     store.upsert_edges(edges)
     return len(edges)

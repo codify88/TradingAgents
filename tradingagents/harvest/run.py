@@ -367,21 +367,31 @@ def status(config: dict | None = None) -> str:
         return "The harvest has not run yet."
     store = get_store(config)
     u = json.loads(cache.read_text())
-    names, etfs, today = u["names"], u["etfs"], u["day"]
+    etfs, today = u["etfs"], u["day"]
+    # The harvest covers the universe and the priority names (saved screens and
+    # decisions), which need not be in the universe: count over both.
+    names = sorted(set(u["names"]) | set(priority_names(config)))
     conn = store._conn()
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS harvest_names (symbol TEXT PRIMARY KEY)")
+    conn.execute("DELETE FROM harvest_names")
+    conn.executemany("INSERT OR IGNORE INTO harvest_names VALUES (?)", [(n,) for n in names])
 
-    def count(endpoint: str, extra: str = "") -> int:
-        return conn.execute(f"SELECT COUNT(DISTINCT symbol) FROM response WHERE vendor=? AND endpoint=? {extra}",
-                            (ds.VENDOR, endpoint)).fetchone()[0]
+    def count(endpoint: str) -> int:
+        return conn.execute("SELECT COUNT(DISTINCT symbol) FROM response WHERE vendor=? AND endpoint=? "
+                            "AND symbol IN (SELECT symbol FROM harvest_names)", (ds.VENDOR, endpoint)).fetchone()[0]
 
     week_ago = (datetime.fromisoformat(today) - timedelta(days=7)).date().isoformat()
     held = conn.execute("SELECT COUNT(DISTINCT symbol) FROM snapshot WHERE endpoint='INSTITUTIONAL_HOLDINGS' "
-                        "AND fetched_on > ?", (week_ago,)).fetchone()[0]
+                        "AND fetched_on > ? AND symbol IN (SELECT symbol FROM harvest_names)",
+                        (week_ago,)).fetchone()[0]
     etf_done = conn.execute("SELECT COUNT(DISTINCT symbol) FROM snapshot WHERE endpoint='ETF_PROFILE'").fetchone()[0]
-    got = conn.execute("SELECT COUNT(*) FROM response WHERE endpoint='EARNINGS_CALL_TRANSCRIPT'").fetchone()[0]
-    expected = sum(len(transcript_quarters(store, s, today)) for s in names)
+    known = {(s, label) for s in names for label, _ in transcript_quarters(store, s, today)}
+    asked = {(sym, json.loads(key).get("quarter")) for sym, key in conn.execute(
+        "SELECT symbol, params_key FROM response WHERE endpoint='EARNINGS_CALL_TRANSCRIPT' "
+        "AND symbol IN (SELECT symbol FROM harvest_names)")}
+    got, expected = len(known & asked), len(known)
     with_earnings = count("EARNINGS")
-    lines = [f"Harvest coverage ({len(names):,} names, {len(etfs):,} ETFs, universe of {today}):",
+    lines = [f"Harvest coverage ({len(names):,} names incl. priority, {len(etfs):,} ETFs, universe of {today}):",
              f"- institutional holdings snapshotted this week: {held:,}/{len(names):,}",
              f"- earnings calendars: {with_earnings:,}/{len(names):,}; insider: {count('INSIDER_TRANSACTIONS'):,}; "
              f"congress: {count('CONGRESS_TRADES'):,}",
