@@ -13,6 +13,11 @@ try:
 
     load_dotenv(find_dotenv(usecwd=True))
     load_dotenv(find_dotenv(".env.enterprise", usecwd=True), override=False)
+    # And the checkout's own .env, for processes started elsewhere: Hermes
+    # launches `tradingagents mcp serve` from the home directory.
+    from pathlib import Path as _Path
+
+    load_dotenv(_Path(__file__).resolve().parent.parent / ".env", override=False)
 except ImportError:
     pass
 
