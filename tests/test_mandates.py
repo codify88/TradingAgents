@@ -36,7 +36,24 @@ def test_absent_mandate_resolves_to_none(empty):
 
 
 def test_registered_mandates_are_discoverable():
-    assert {m.name for m in list_mandates()} == {"equity_value", "equity_momentum", "equity_momentum_leaps"}
+    assert {m.name for m in list_mandates()} == {"equity_value", "equity_momentum", "equity_momentum_leaps",
+                                                 "equity_value_lenses"}
+
+
+def test_the_lenses_trial_changes_the_judgement_and_nothing_else():
+    """Everything that decides what is measured is the base's; only guidance differs,
+    and its decisions never stand in for the base's (scores_as_base)."""
+    from tradingagents.mandates.registry import get_mandate, serves
+
+    base, lenses = get_mandate("equity_value"), get_mandate("equity_value_lenses")
+    for attr in ("horizon_days", "review_horizons_days", "benchmark", "thesis_frame",
+                 "disqualifiers", "analysts", "risk_frame"):
+        assert getattr(lenses, attr) == getattr(base, attr), attr
+    assert lenses.base == "equity_value" and not lenses.scores_as_base
+    assert not serves("equity_value_lenses", "equity_value")
+    assert {"bull", "bear", "research_manager", "portfolio_manager"} <= set(lenses.agent_guidance)
+    assert lenses.agent_guidance["trader"] == base.agent_guidance["trader"]
+    assert "MUNGER" in lenses.agent_guidance["research_manager"]
 
 
 # --- horizons -------------------------------------------------------------
