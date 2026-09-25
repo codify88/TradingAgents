@@ -1596,11 +1596,21 @@ def harvest_command(
     max_requests: int = typer.Option(25_000, "--max-requests", help="Stop after this many vendor requests."),
     stop_at: str = typer.Option(None, "--stop-at", help="HH:MM: stop by then (the nightly job passes 07:30)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Count what is due without requesting it."),
+    only: str = typer.Option(None, "--only", help="Comma-separated stages to run, e.g. 'etf profiles'."),
+    skip: str = typer.Option(None, "--skip", help="Comma-separated stages to leave for later."),
 ):
     """Pull transcripts, insider and congressional trades, and holdings ahead of need."""
-    from tradingagents.harvest.run import run
+    from tradingagents.harvest.run import STAGES, run
 
-    report = run(max_requests, stop_at=stop_at, dry_run=dry_run)
+    def stages(value):
+        chosen = {x.strip() for x in value.split(",") if x.strip()} if value else None
+        unknown = (chosen or set()) - set(STAGES)
+        if unknown:
+            console.print(f"[red]Unknown stage(s): {', '.join(sorted(unknown))}. Stages: {', '.join(STAGES)}[/red]")
+            raise typer.Exit(code=1)
+        return chosen
+
+    report = run(max_requests, stop_at=stop_at, dry_run=dry_run, only=stages(only), skip=stages(skip))
     print(("[dry run] " if dry_run else "") + report.render())
 
 

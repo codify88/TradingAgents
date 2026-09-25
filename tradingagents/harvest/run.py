@@ -278,8 +278,15 @@ def _stop_time(stop_at: str | None, started: datetime) -> datetime | None:
     return started if started.hour < 12 else stop + timedelta(days=1)
 
 
+STAGES = ("politicians", "holdings", "earnings", "overview", "etf profiles", "insider", "congress",
+          "transcripts (priority)", "transcripts")
+
+
 def run(max_requests: int, stop_at: str | None = None, dry_run: bool = False,
-        config: dict | None = None, sleep=time.sleep) -> HarvestReport:
+        config: dict | None = None, sleep=time.sleep,
+        only: set[str] | None = None, skip: set[str] | None = None) -> HarvestReport:
+    """``only``/``skip`` restrict the stages (names in ``STAGES``); for validation
+    and daytime runs -- the nightly job runs everything in order."""
     from tradingagents.dataflows.alpha_vantage_common import (
         AlphaVantageRateLimitError,
         _make_api_request,
@@ -296,6 +303,8 @@ def run(max_requests: int, stop_at: str | None = None, dry_run: bool = False,
     consecutive = 0
 
     for task in tasks(store, names, etfs, priority_names(config), datetime.now(UTC)):
+        if (only and task.stage not in only) or (skip and task.stage in skip):
+            continue
         if report.requests >= max_requests:
             report.stopped = f"budget ({max_requests:,} requests)"
             break

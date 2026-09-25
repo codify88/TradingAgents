@@ -303,3 +303,13 @@ def test_holdings_come_from_the_snapshot_on_or_before_the_date_and_13f_timing(st
                    symbol="NVDA", fetched_on="2026-08-01")
     out = ownership.get_institutional_holdings("NVDA", "2026-08-10")
     assert "OLD Q" in out and "NEW Q" not in out, "the June 13F was not due until 2026-08-14"
+
+
+@pytest.mark.unit
+def test_only_and_skip_restrict_the_stages(store, fake_vendor):
+    calls, _ = fake_vendor
+    report = hv.run(100, config=store.cfg, only={"insider"})
+    assert set(report.by_stage) == {"insider"} and {c[0] for c in calls} == {"INSIDER_TRANSACTIONS"}
+    calls.clear()
+    report = hv.run(100, config=store.cfg, skip={"holdings", "politicians"})
+    assert "holdings" not in report.by_stage and "politicians" not in report.by_stage
