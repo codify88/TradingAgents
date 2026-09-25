@@ -1614,6 +1614,15 @@ def harvest_command(
     print(("[dry run] " if dry_run else "") + report.render())
 
 
+@app.command(name="harvest-graph")
+def harvest_graph_command():
+    """Rebuild the entity graph from stored responses (after a parser fix; no requests)."""
+    from tradingagents.datastore import get_store, graph
+
+    for source, n in sorted(graph.rebuild(get_store()).items()):
+        print(f"{source}: {n:,}")
+
+
 @app.command(name="harvest-status")
 def harvest_status_command():
     """Show how far the harvest's backfill has got, dataset by dataset."""

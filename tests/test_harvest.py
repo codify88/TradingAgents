@@ -313,3 +313,26 @@ def test_only_and_skip_restrict_the_stages(store, fake_vendor):
     calls.clear()
     report = hv.run(100, config=store.cfg, skip={"holdings", "politicians"})
     assert "holdings" not in report.by_stage and "politicians" not in report.by_stage
+
+
+@pytest.mark.unit
+def test_a_date_with_form_4_xml_glued_on_is_read_by_its_leading_date(store):
+    """Seen in the first harvest for HD, JNJ and NTAP (2003 Form 4s)."""
+    body = json.dumps({"data": [
+        {"transaction_date": "2003-08-26</value></transactionDate><transactionCoding>", "executive": "A B"},
+        {"transaction_date": "not a date", "executive": "C D"},
+    ]})
+    assert graph.fill_insider(store, "HD", body) == 1
+    assert store.edges_to("ticker:HD", "traded")[0]["as_of"] == "2003-08-26"
+
+
+@pytest.mark.unit
+def test_the_graph_rebuilds_from_stored_responses_without_requests(store):
+    _put(store, "INSIDER_TRANSACTIONS", {"symbol": "IBM"},
+         {"data": [{"transaction_date": "2026-09-01", "executive": "X Y"}]})
+    store.snapshot(ds.VENDOR, "INSTITUTIONAL_HOLDINGS", params_key({"symbol": "IBM"}),
+                   json.dumps({"holdings": [{"holder_name": "FUND", "shares_held": "1", "last_reported": "2026-06-30"}]}),
+                   symbol="IBM", fetched_on="2026-09-20")
+    counts = graph.rebuild(store)
+    assert counts["INSIDER_TRANSACTIONS"] == 1 and counts["INSTITUTIONAL_HOLDINGS"] == 1
+    assert store.edges_to("ticker:IBM", "traded") and store.edges_to("ticker:IBM", "holds")

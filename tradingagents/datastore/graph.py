@@ -38,6 +38,17 @@ def normalise_name(name: str) -> str:
     return n
 
 
+_DATE = re.compile(r"^\s*(\d{4}-\d{2}-\d{2})")
+
+
+def clean_date(value) -> str | None:
+    """The leading YYYY-MM-DD of a vendor date field, or None. Old insider rows
+    carry raw Form 4 XML after the date ("2003-08-26</value><transactionCoding>...",
+    seen for HD, JNJ and NTAP in the first harvest)."""
+    m = _DATE.match(str(value or ""))
+    return m.group(1) if m else None
+
+
 def _ref(row: dict) -> str:
     return hashlib.sha1(json.dumps(row, sort_keys=True).encode()).hexdigest()[:12]
 
@@ -50,7 +61,7 @@ def fill_insider(store, symbol: str, body: str) -> int:
     rows = json.loads(body).get("data") or []
     edges, nodes = [], {}
     for r in rows:
-        name, day = normalise_name(r.get("executive", "")), r.get("transaction_date")
+        name, day = normalise_name(r.get("executive", "")), clean_date(r.get("transaction_date"))
         if not name or not day:
             continue
         person = f"insider:{name}"
@@ -69,7 +80,7 @@ def fill_congress(store, symbol: str, body: str) -> int:
     rows = json.loads(body).get("trades") or []
     edges, nodes = [], {}
     for r in rows:
-        bio, day, filed = r.get("bioguide_id"), r.get("transaction_date"), r.get("filed_date")
+        bio, day, filed = r.get("bioguide_id"), clean_date(r.get("transaction_date")), clean_date(r.get("filed_date"))
         if not bio or not day or not filed:
             continue
         pol = f"politician:{bio}"
@@ -105,14 +116,14 @@ def fill_institutional(store, symbol: str, body: str) -> int:
     rows = json.loads(body).get("holdings") or []
     rows = sorted(rows, key=_shares, reverse=True)[:INSTITUTIONS_PER_TICKER]
     # The top holders change between snapshots of one quarter; replace, don't accumulate.
-    periods = {r.get("last_reported") for r in rows if r.get("last_reported")}
+    periods = {clean_date(r.get("last_reported")) for r in rows} - {None}
     conn = store._conn()
     for period in periods:
         conn.execute("DELETE FROM edge WHERE dst=? AND kind='holds' AND source='INSTITUTIONAL_HOLDINGS' "
                      "AND as_of=?", (_ticker(symbol), period))
     edges, nodes = [], {}
     for r in rows:
-        name, period = normalise_name(r.get("holder_name", "")), r.get("last_reported")
+        name, period = normalise_name(r.get("holder_name", "")), clean_date(r.get("last_reported"))
         if not name or not period:
             continue
         inst = f"institution:{name}"
@@ -152,6 +163,56 @@ def fill_overview(store, symbol: str, body: str, fetched_day: str) -> int:
             edges.append((_ticker(symbol), node, kind, fetched_day, "", fetched_day, "OVERVIEW", {}))
     store.upsert_edges(edges)
     return len(edges)
+
+
+def rebuild(store, vendor: str = "alpha_vantage") -> dict[str, int]:
+    """Refill the graph from every stored insider, congressional, overview and
+    politician response and each symbol's latest holdings and ETF snapshot --
+    after a parser fix, without a single request."""
+    import datetime as _dt
+
+    from tradingagents.datastore.store import params_key
+
+    conn = store._conn()
+    counts: dict[str, int] = {}
+
+    def bodies(endpoint):
+        for key, symbol in conn.execute(
+                "SELECT params_key, symbol FROM response WHERE vendor=? AND endpoint=?", (vendor, endpoint)):
+            row = store.get(vendor, endpoint, key)
+            if row is not None:
+                yield symbol, row[0], row[1]
+
+    fills = {"INSIDER_TRANSACTIONS": fill_insider, "CONGRESS_TRADES": fill_congress}
+    for _, body, _ in bodies("POLITICIAN_METADATA"):
+        counts["POLITICIAN_METADATA"] = counts.get("POLITICIAN_METADATA", 0) + fill_politicians(store, body)
+    for endpoint, fill in fills.items():
+        for symbol, body, _ in bodies(endpoint):
+            try:
+                counts[endpoint] = counts.get(endpoint, 0) + fill(store, symbol, body)
+            except (ValueError, TypeError, AttributeError):
+                counts[endpoint + " (unreadable)"] = counts.get(endpoint + " (unreadable)", 0) + 1
+    for symbol, body, fetched in bodies("OVERVIEW"):
+        try:
+            fill_overview(store, symbol, body, fetched.astimezone(_dt.UTC).date().isoformat())
+            counts["OVERVIEW"] = counts.get("OVERVIEW", 0) + 1
+        except (ValueError, TypeError, AttributeError):
+            pass
+    for endpoint in ("INSTITUTIONAL_HOLDINGS", "ETF_PROFILE"):
+        symbols = [r[0] for r in conn.execute(
+            "SELECT DISTINCT symbol FROM snapshot WHERE vendor=? AND endpoint=?", (vendor, endpoint))]
+        for symbol in symbols:
+            snaps = store.snapshots(vendor, endpoint, params_key({"symbol": symbol}))
+            if not snaps:
+                continue
+            day, body = snaps[-1]
+            try:
+                n = (fill_institutional(store, symbol, body) if endpoint == "INSTITUTIONAL_HOLDINGS"
+                     else fill_etf(store, symbol, body, day))
+                counts[endpoint] = counts.get(endpoint, 0) + n
+            except (ValueError, TypeError, AttributeError):
+                pass
+    return counts
 
 
 def fill_politicians(store, body: str) -> int:
