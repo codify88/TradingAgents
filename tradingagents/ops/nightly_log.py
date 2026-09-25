@@ -176,6 +176,19 @@ def log_for(log_dir: str | Path, day: date) -> Path | None:
     return matches[-1] if matches else None
 
 
+def missed_today(latest_log: Path, now: datetime, scheduled: str = "02:00",
+                 grace: timedelta = timedelta(hours=1)) -> str | None:
+    """A sentence when today's run should have started by now and has not."""
+    h, mi = (int(x) for x in scheduled.split(":"))
+    due = now.replace(hour=h, minute=mi, second=0, microsecond=0) + grace
+    m = _STAMP.search(latest_log.name)
+    last = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S") if m else None
+    if now >= due and (last is None or last.date() < now.date()):
+        return (f"No nightly run has started today (due {scheduled}); the latest is from "
+                f"{last:%Y-%m-%d %H:%M}." if last else f"No nightly run has started today (due {scheduled}).")
+    return None
+
+
 def latest(log_dir: str | Path) -> Path | None:
     logs = sorted(p for p in Path(log_dir).glob("*.log") if _STAMP.search(p.name))
     return logs[-1] if logs else None

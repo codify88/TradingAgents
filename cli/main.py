@@ -1565,6 +1565,32 @@ def mcp_serve():
     serve()
 
 
+schedule_app = typer.Typer(help="The platform's timed jobs and the wakes they need.")
+app.add_typer(schedule_app, name="schedule")
+
+WAKE_SCHEDULE_PATH = Path.home() / ".tradingagents" / "wake-schedule"
+
+
+@schedule_app.command(name="show")
+def schedule_show():
+    """List the timed jobs, their wakes, and when each next runs."""
+    from datetime import datetime
+
+    from tradingagents.ops.schedule import describe
+
+    console.print(describe(datetime.now().astimezone()))
+
+
+@schedule_app.command(name="export")
+def schedule_export(
+    path: str = typer.Option(str(WAKE_SCHEDULE_PATH), "--path", help="Where the wake daemon reads it."),
+):
+    """Write the wake times the root wake daemon reads (one HH:MM per line)."""
+    from tradingagents.ops.schedule import export
+
+    console.print(f"Wake schedule written to {export(Path(path))}")
+
+
 @app.command(name="store-stats")
 def store_stats(
     day: str = typer.Option(None, "--day", help="New York date, YYYY-MM-DD; default today."),

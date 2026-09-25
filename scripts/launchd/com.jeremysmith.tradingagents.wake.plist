@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The wake daemon (root). Installed into /Library/LaunchDaemons by
+     scripts/install-platform.sh; runs a root-owned copy of wake-daemon.sh at load
+     and every 30 minutes. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jeremysmith.tradingagents.wake</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/libexec/tradingagents-wake</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/tradingagents-wake.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/tradingagents-wake.log</string>
+</dict>
+</plist>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Hermes gateway, kept alive: it restarts if it dies and resumes after a
+     wake. Installed by scripts/install-platform.sh only when `hermes` is on the
+     PATH. __HERMES__ and __HOME__ are filled in at install. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jeremysmith.tradingagents.hermes</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HERMES__</string>
+        <string>gateway</string>
+        <string>run</string>
+        <!-- launchd owns this process: in-chat restarts exit back to it
+             instead of spawning a detached replacement. -->
+        <string>--external-supervisor</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.tradingagents/logs/hermes.out</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.tradingagents/logs/hermes.err</string>
+</dict>
+</plist>

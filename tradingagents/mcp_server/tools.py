@@ -13,7 +13,7 @@ Design: docs/design/hermes.md, part 1.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -54,7 +54,12 @@ def nightly_status(day: str | None = None) -> str:
             else nightly_log.latest(log_dir))
     if path is None:
         return f"No nightly run found{' for ' + day if day else ''} in {log_dir}."
-    return nightly_log.parse(path).summary()
+    summary = nightly_log.parse(path).summary()
+    if not day:
+        missed = nightly_log.missed_today(path, datetime.now())
+        if missed:
+            summary = f"{missed}\n\nThe latest run:\n{summary}"
+    return summary
 
 
 # -- decisions -----------------------------------------------------------------------

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The nightly chain (installed by scripts/install-platform.sh into
+     ~/Library/LaunchAgents). __REPO__ and __HOME__ are filled in at install. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jeremysmith.tradingagents.nightly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO__/scripts/platform-run.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- NIGHTLY_MAX_NAMES is the money knob: each name is roughly eight minutes
+         and a couple of dollars of model time. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NIGHTLY_MANDATE</key>
+        <string>equity_value</string>
+        <key>NIGHTLY_MAX_NAMES</key>
+        <string>3</string>
+        <key>NIGHTLY_PICKS</key>
+        <string>8</string>
+        <key>NIGHTLY_CONTROLS</key>
+        <string>4</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.tradingagents/logs/nightly/launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.tradingagents/logs/nightly/launchd.err</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

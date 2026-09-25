@@ -105,3 +105,13 @@ def test_finding_a_days_log():
     assert log_for(FIX, date(2026, 9, 24)).name == "20260924_020003.log"
     assert log_for(FIX, date(2026, 9, 1)) is None
     assert latest(FIX).name == "20260925_021157.log"
+
+
+@pytest.mark.unit
+def test_a_run_that_never_started_today_is_named():
+    from tradingagents.ops.nightly_log import missed_today
+
+    last = FIX / "20260924_020003.log"
+    assert "No nightly run has started today" in missed_today(last, datetime(2026, 9, 25, 9, 0))
+    assert missed_today(last, datetime(2026, 9, 25, 2, 30)) is None, "not due until an hour after 02:00"
+    assert missed_today(last, datetime(2026, 9, 24, 9, 0)) is None, "today's run exists"
