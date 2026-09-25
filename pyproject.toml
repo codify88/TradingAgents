@@ -39,6 +39,11 @@ dev = [
 bedrock = [
     "langchain-aws>=1.5.0",
 ]
+# The operator's MCP server (tradingagents mcp serve), for Hermes or any MCP
+# client. Optional so the core install stays lean.
+mcp = [
+    "mcp>=2.2",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"

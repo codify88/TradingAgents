@@ -1553,6 +1553,18 @@ def screen_run_command(
         raise typer.Exit(code=2)
 
 
+mcp_app = typer.Typer(help="This system's read tools over MCP, for Hermes or any MCP client.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command(name="serve")
+def mcp_serve():
+    """Serve the read-only operator tools over stdio (needs the optional mcp install)."""
+    from tradingagents.mcp_server.server import serve
+
+    serve()
+
+
 @app.command(name="store-stats")
 def store_stats(
     day: str = typer.Option(None, "--day", help="New York date, YYYY-MM-DD; default today."),

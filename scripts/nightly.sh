@@ -47,7 +47,7 @@ fi
 
 cd "$REPO" || { echo "FATAL: cannot enter $REPO"; exit 1; }
 
-echo "--- step 1: screen (no model calls) ---"
+echo "--- step 1: screen (no model calls) [$(date +%H:%M:%S)] ---"
 if ! "$TRADINGAGENTS" screen --mandate "$MANDATE" --picks "$PICKS" \
         --controls "$CONTROLS" --budget "$BUDGET" < /dev/null; then
     echo "screen failed; not starting the agent loop on a stale shortlist."
@@ -58,12 +58,12 @@ echo
 # Scoped to $MANDATE, not every saved screen. Without this the job screens for
 # one mandate and then adjudicates whatever is oldest across all of them -- so a
 # job called "the value job" would quietly spend its budget on momentum names.
-echo "--- step 2: adjudicate at most $MAX_NAMES $MANDATE names ---"
+echo "--- step 2: adjudicate at most $MAX_NAMES $MANDATE names [$(date +%H:%M:%S)] ---"
 "$TRADINGAGENTS" screen-run --all --mandate "$MANDATE" --max-names "$MAX_NAMES" < /dev/null
 STATUS=$?
 
 echo
-echo "--- summary ---"
+echo "--- summary [$(date +%H:%M:%S)] ---"
 "$TRADINGAGENTS" screen-review --mandate "$MANDATE" < /dev/null || true
 
 echo
