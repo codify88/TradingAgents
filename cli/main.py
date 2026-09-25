@@ -1780,6 +1780,46 @@ def exit_study_command():
     console.print(Markdown(render(study(entries))))
 
 
+learn_app = typer.Typer(help="Playbooks distilled from settled outcomes, gated by evidence.")
+app.add_typer(learn_app, name="learn")
+
+
+@learn_app.command(name="distill")
+def learn_distill(
+    mandate: str = typer.Option(..., "--mandate", help="The mandate whose playbook to update."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Propose and check, but save nothing."),
+):
+    """One model call proposes playbook edits; a deterministic check and the evidence gate decide."""
+    from tradingagents.learning.distill import distill
+
+    result = distill(DEFAULT_CONFIG, mandate, dry_run=dry_run)
+    if result.playbook is None:
+        console.print(f"No lessons yet for {mandate}.")
+        return
+    console.print(result.render())
+    console.print(Markdown(result.playbook.render()))
+
+
+@learn_app.command(name="show")
+def learn_show(mandate: str = typer.Option(..., "--mandate")):
+    """The latest playbook for a mandate."""
+    from tradingagents.learning.playbook import latest
+
+    pb = latest(DEFAULT_CONFIG, mandate)
+    console.print(Markdown(pb.render()) if pb else f"No playbook for {mandate} yet.")
+
+
+@learn_app.command(name="lessons")
+def learn_lessons(mandate: str = typer.Option(..., "--mandate")):
+    """How many lessons each mandate has, settled and interim."""
+    from tradingagents.learning.lessons import load_lessons
+
+    lessons = load_lessons(DEFAULT_CONFIG, mandate=mandate)
+    final = sum(x.final for x in lessons)
+    console.print(f"{mandate}: {len(lessons)} lessons ({final} settled, {len(lessons) - final} interim), "
+                  f"{len({x.ticker for x in lessons})} names.")
+
+
 @app.command(name="screen-review")
 def screen_review(
     mandate: str = typer.Option(
