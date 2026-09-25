@@ -16,7 +16,9 @@ cell rather than a position carried forward.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +27,7 @@ from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.utils.rating import RATING_REVIEW
 from tradingagents.dataflows.utils import get_current_date, safe_ticker_component
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.usage import UsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,8 @@ class BacktestResult:
     skipped: int = 0
     failures: list[tuple[str, str, str]] = field(default_factory=list)
     settlement_failures: list[tuple[str, str]] = field(default_factory=list)
+    # One row per cell attempted and per settlement pass, as written to usage.jsonl.
+    usage: list[dict] = field(default_factory=list)
 
 
 # What each rating claims will happen, so an outcome can be scored against it.
@@ -237,8 +242,19 @@ def run_backtest(
     run_config = {**config, "results_dir": str(run_dir),
                   "memory_log_path": str(run_dir / "trading_memory.md")}
 
-    graph = TradingAgentsGraph(selected_analysts, config=run_config, mandate=mandate)
+    tracker = UsageTracker()
+    graph = TradingAgentsGraph(selected_analysts, config=run_config, mandate=mandate,
+                               callbacks=[tracker])
     result = BacktestResult(run_id=run_id, log_path=Path(run_config["memory_log_path"]))
+    usage_path = run_dir / "usage.jsonl"
+
+    def record(kind: str, ticker: str, date: str | None, status: str, before, started: float):
+        row = {"kind": kind, "ticker": ticker, "date": date, "status": status,
+               "seconds": round(time.monotonic() - started, 1),
+               "mandate": graph.mandate_name, **(tracker.snapshot() - before).asdict()}
+        result.usage.append(row)
+        with usage_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
     done = {
         (e["ticker"], e["date"], e.get("mandate", ""))
         for e in graph.memory_log.load_entries()
@@ -249,21 +265,29 @@ def run_backtest(
             if (ticker, date, graph.mandate_name) in done:
                 result.skipped += 1
                 continue
+            before, started = tracker.snapshot(), time.monotonic()
             try:
                 graph.propagate(ticker, date, asset_type, portfolio=portfolio)
                 result.cells_run += 1
+                record("cell", ticker, date, "ok", before, started)
             except Exception as exc:  # one unreachable vendor must not end the sweep
                 logger.warning("Backtest cell %s %s failed: %s", ticker, date, exc)
                 result.failures.append((ticker, date, str(exc)))
+                record("cell", ticker, date, "failed", before, started)
 
     # Settlement runs at the start of the next run for a ticker, so each ticker's
     # last cell would stay pending without this pass.
     for ticker in tickers:
+        before, started = tracker.snapshot(), time.monotonic()
         try:
             graph.settle_pending(ticker)
+            status = "ok"
         except Exception as exc:  # reflection calls an LLM; one failure is not the sweep's
             logger.warning("Settling %s failed: %s", ticker, exc)
             result.settlement_failures.append((ticker, str(exc)))
+            status = "failed"
+        if (tracker.snapshot() - before).llm_calls:
+            record("settle", ticker, None, status, before, started)
     return result
 
 

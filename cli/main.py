@@ -52,6 +52,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.mandates.graph import iter_mandate_reports
 from tradingagents.portfolio import load_portfolio
 from tradingagents.reporting import write_report_tree
+from tradingagents.usage import render_usage
 
 console = Console()
 
@@ -1346,6 +1347,8 @@ def backtest(
         raise typer.Exit(code=1) from None
     console.print(summarize(TradingMemoryLog({"memory_log_path": str(result.log_path)})).render())
     console.print(f"\nRan {result.cells_run} cells, skipped {result.skipped}. Log: {result.log_path}")
+    if usage_line := render_usage(getattr(result, "usage", None) or []):
+        console.print(usage_line)
     for ticker, date, reason in result.failures:
         console.print(f"[yellow]failed:[/yellow] {ticker} {date}: {reason}")
     for ticker, reason in result.settlement_failures:
@@ -1460,6 +1463,8 @@ def _run_screen_plan(
         raise typer.Exit(code=1) from None
     console.print(summarize(TradingMemoryLog({"memory_log_path": str(result.log_path)})).render())
     console.print(f"\nRan {result.cells_run} names, skipped {result.skipped}. Log: {result.log_path}")
+    if usage_line := render_usage(getattr(result, "usage", None) or []):
+        console.print(usage_line)
     for ticker, date, reason in result.failures:
         console.print(f"[yellow]failed:[/yellow] {ticker} {date}: {reason} -- run again to retry")
     console.print(
