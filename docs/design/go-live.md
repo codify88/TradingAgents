@@ -30,6 +30,25 @@ did or did not.
 Small samples, heavy tails, before costs. The first job of every phase is to
 grow the number of screens each of these rests on.
 
+## Phase 1 so far (screen lab, 2026-09-25)
+
+Every week (standard) or month (momentum) since 2012, from a panel of 8,695
+daily histories, delisted names included; tuned before 2020, tested from 2020.
+
+- **Standard**: no ordering clears the bar (32 variants, hurdle t 3.16). The
+  best tuned is "the 8 most liquid names" (t 2.99; test +0.45% a week, t 2.3),
+  which is mostly the mega-cap run since 2020 rather than a short-term signal.
+  Reversal is positive on the test dates (+0.6% a week) but weak in tuning.
+  The live screen keeps its default (liquidity) until something clears; for
+  standard, the agents are the edge to test, not the ordering.
+- **Momentum**: the live ordering works only among the most liquid names.
+  Across all ~2,000 survivors, 12-month excess return picked worse than the
+  pool in tuning; within the 60 most liquid (as the live screen ranks) it
+  picked +4.6% a holding better (t 3.1) and +9.9% on the test dates (t 1.6,
+  74 overlapping months). Ranking those 60 by liquidity alone gets most of
+  that: the selection beyond size is about +1-2% a holding.
+- **Value**: needs point-in-time fundamentals in the lab; next.
+
 ## Two things to hold onto
 
 1. **Backtests of LLM judgement flatter it.** The models have read about the
