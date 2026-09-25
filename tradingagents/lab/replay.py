@@ -60,6 +60,10 @@ class Strategy:
     # The live value and momentum screens rank within their 60-name liquidity budget.
     pools: tuple[int | None, ...] = (None,)
     note: str = ""
+    fundamentals: bool = False             # rank and exclude on point-in-time value facts
+    qualities: tuple[bool, ...] = (True,)  # with / without the quality exclusions
+    split: str = "2020-01-01"              # tune before, test from
+    read_horizons: tuple[int, ...] = ()    # shorter holds reported beside the verdict
 
 
 STRATEGIES = {
@@ -74,6 +78,15 @@ STRATEGIES = {
         pools=(None, 60),
         note="Price tier and ordering only: the live screen's trend and growth exclusions are not "
              "replayed yet. Pool 60 ranks within the 60 most liquid names, as the live screen does."),
+    "value": Strategy(
+        "equity_value", 756, "IWD", "month",
+        ("fcf_pct", "fcf_yield", "ey_pct", "ebit_pct", "liquidity", "random"),
+        min_dollar_volume=(5e6,), pools=(60, 120), fundamentals=True, qualities=(True, False),
+        split="2018-01-01", read_horizons=(252,),
+        note="The live value screen on point-in-time statements: the 60 (or 120) most liquid names, "
+             "the quality exclusions (or none: /noq), one cheapness ordering. Statements are restated "
+             "figures and start in 2006. A 3-year hold sampled monthly gives about one independent "
+             "holding every three years, so the 1-year read is shown beside it."),
 }
 
 
@@ -83,16 +96,17 @@ class Variant:
     picks: int
     min_dollar_volume: float
     pool: int | None = None
+    quality: bool = True
 
     @property
     def id(self) -> str:
         base = f"{self.signal}/p{self.picks}/dv{self.min_dollar_volume / 1e6:g}m"
-        return base + (f"/top{self.pool}" if self.pool else "")
+        return base + (f"/top{self.pool}" if self.pool else "") + ("" if self.quality else "/noq")
 
 
 def variants(strategy: Strategy) -> list[Variant]:
-    return [Variant(s, p, dv, pool) for s in strategy.signals for p in strategy.picks
-            for dv in strategy.min_dollar_volume for pool in strategy.pools]
+    return [Variant(s, p, dv, pool, q) for s in strategy.signals for p in strategy.picks
+            for dv in strategy.min_dollar_volume for pool in strategy.pools for q in strategy.qualities]
 
 
 # --- the context: arrays, schedule, universes ---------------------------------------
@@ -115,6 +129,27 @@ class Context:
                                      dtype=int)
                          for d, syms in universes.items()}
         self._cache: dict[tuple, np.ndarray] = {}
+        self.facts: dict[str, dict] = {}  # date -> {symbol: lab.fundamentals.Facts}, for value replays
+
+    def set_facts(self, facts: dict) -> None:
+        """``{(symbol, date): Facts}`` as the fundamentals cache keeps them."""
+        self.facts = {}
+        for (symbol, day), f in facts.items():
+            self.facts.setdefault(day, {})[symbol] = f
+
+    def liquid_eligible(self, i: int, min_dollar_volume: float, pool: int | None) -> np.ndarray:
+        """Eligible names on row ``i`` (listed, a year of closes, >= $5 as traded, above
+        the liquidity floor, trading the next day), most liquid first, at most ``pool``."""
+        cols = self.members(i)
+        if cols.size == 0 or i + 1 >= len(self.dates):
+            return cols[:0]
+        ok = (self.history_ok(i)[cols] & (self.RC[i, cols] >= MIN_PRICE)
+              & (self.dollar_volume(i)[cols] >= min_dollar_volume)
+              & ~np.isnan(self.O[i + 1, cols]))
+        cols = cols[ok]
+        if pool and cols.size > pool:
+            cols = cols[np.argsort(-self.dollar_volume(i)[cols], kind="stable")[:pool]]
+        return cols
 
     def schedule(self, every: str, start: str, end: str | None = None) -> list[int]:
         """Row indices of the last trading day of each week or month."""
@@ -163,7 +198,33 @@ class Context:
             return exit_ / entry - 1
 
 
+def _judged(ctx: Context, i: int, cols: np.ndarray, quality: bool) -> np.ndarray:
+    """Names the value screen could judge on row ``i``: facts computed and usable,
+    and -- with ``quality`` -- no quality exclusion tripped. As live, a name that
+    cannot be judged is neither a pick nor in the pool."""
+    known = ctx.facts.get(ctx.dates[i].strftime("%Y-%m-%d"), {})
+    keep = []
+    for j in cols:
+        f = known.get(str(ctx.symbols[j]))
+        if f is None or f.error or (quality and f.tripped):
+            continue
+        keep.append(j)
+    return np.array(keep, dtype=int)
+
+
+def _fact_signal(ctx: Context, name: str, i: int) -> np.ndarray:
+    out = np.full(len(ctx.symbols), np.nan)
+    for symbol, f in ctx.facts.get(ctx.dates[i].strftime("%Y-%m-%d"), {}).items():
+        if not f.error and symbol in ctx.col:
+            out[ctx.col[symbol]] = f.values.get(name, np.nan)
+    return out
+
+
 def _signal(ctx: Context, name: str, i: int, seed: int) -> np.ndarray:
+    from .fundamentals import MEASURES
+
+    if name in MEASURES:
+        return _fact_signal(ctx, name, i)
     with _quiet():
         if name == "liquidity":
             return ctx.dollar_volume(i)
@@ -200,6 +261,10 @@ SIGNALS = {
     "excess_12m": "12-month return over SPY (the live momentum ordering)",
     "low_vol_63": "lowest 63-day volatility first",
     "high_52w": "closest to the 52-week high first",
+    "fcf_pct": "FCF yield percentile in the company's own history (the live value ordering)",
+    "fcf_yield": "trailing FCF yield, across companies",
+    "ey_pct": "earnings yield percentile in the company's own history",
+    "ebit_pct": "EBIT / EV percentile in the company's own history",
 }
 
 
@@ -223,24 +288,19 @@ class Row:
 
 
 def replay(ctx: Context, strategy: Strategy, variant: Variant, dates: list[int],
-           seed: int = 7) -> list[Row]:
-    horizon = strategy.horizon
+           seed: int = 7, horizon: int | None = None) -> list[Row]:
+    horizon = horizon or strategy.horizon
     bench = {s: ctx.col.get(s) for s in ("SPY", "RSP", strategy.style)}
     out = []
     for i in dates:
         if i + 1 + horizon >= len(ctx.dates):
             continue
-        cols = ctx.members(i)
+        cols = ctx.liquid_eligible(i, variant.min_dollar_volume, variant.pool)
         if cols.size == 0:
             continue
-        ok = (ctx.history_ok(i)[cols] & (ctx.RC[i, cols] >= MIN_PRICE)
-              & (ctx.dollar_volume(i)[cols] >= variant.min_dollar_volume)
-              & ~np.isnan(ctx.O[i + 1, cols]))
-        cols = cols[ok]
-        if variant.pool and cols.size > variant.pool:
-            dv = ctx.dollar_volume(i)[cols]
-            cols = cols[np.argsort(-dv, kind="stable")[:variant.pool]]
-        score = _signal(ctx, variant.signal, i, seed)[cols]
+        if strategy.fundamentals:
+            cols = _judged(ctx, i, cols, variant.quality)
+        score = _signal(ctx, variant.signal, i, seed)[cols] if cols.size else cols.astype(float)
         keep = ~np.isnan(score)
         cols, score = cols[keep], score[keep]
         if cols.size <= variant.picks:
@@ -284,9 +344,9 @@ def newey_west_t(x: np.ndarray, lags: int) -> float:
     return float(x.mean() / math.sqrt(s / n)) if s > 0 else math.nan
 
 
-def lags_for(strategy: Strategy) -> int:
+def lags_for(strategy: Strategy, horizon: int | None = None) -> int:
     step = 5 if strategy.every == "week" else 21
-    return max(0, math.ceil(strategy.horizon / step) - 1)
+    return max(0, math.ceil((horizon or strategy.horizon) / step) - 1)
 
 
 @dataclass
@@ -300,20 +360,21 @@ class Stats:
     style: float              # style - S&P 500
     universe: float           # pool - style
     size: float               # RSP - S&P 500
+    independent: float = math.nan  # holdings that do not overlap: n / (lags + 1)
 
 
-def stats(rows: list[Row], strategy: Strategy) -> Stats:
+def stats(rows: list[Row], strategy: Strategy, horizon: int | None = None) -> Stats:
     if not rows:
         return Stats(0, *([math.nan] * 8))
     f = pd.DataFrame([asdict(r) for r in rows])
     sel = (f.picks - f.pool).to_numpy()
     net = (f.picks - 2 * COST_PER_SIDE - f.market).to_numpy()
-    lags = lags_for(strategy)
+    lags = lags_for(strategy, horizon)
     return Stats(
         n=len(f), selection=float(np.nanmean(sel)), t=newey_west_t(sel, lags),
         hit=float(np.mean(sel > 0)), net_vs_market=float(np.nanmean(net)), t_net=newey_west_t(net, lags),
         style=float(np.nanmean(f["style"] - f.market)), universe=float(np.nanmean(f.pool - f["style"])),
-        size=float(np.nanmean(f.equal - f.market)))
+        size=float(np.nanmean(f.equal - f.market)), independent=len(f) / (lags + 1))
 
 
 # --- the bar ----------------------------------------------------------------------
@@ -335,22 +396,31 @@ class Result:
     tune: Stats
     test: Stats
     recent: list[Row] = field(default_factory=list)
+    reads: dict[int, tuple[Stats, Stats]] = field(default_factory=dict)  # horizon -> (tune, test)
 
 
-def evaluate(ctx: Context, strategy: Strategy, split: str, start: str,
+def _split(rows: list[Row], cut: pd.Timestamp, horizon: int) -> tuple[list[Row], list[Row]]:
+    # A tuning date whose holding ends after the split would let the test
+    # period's prices into the tuning: those dates are left out of both.
+    embargo = cut - pd.offsets.BDay(horizon + 1)
+    return ([r for r in rows if pd.Timestamp(r.date) < embargo],
+            [r for r in rows if pd.Timestamp(r.date) >= cut])
+
+
+def evaluate(ctx: Context, strategy: Strategy, split: str | None, start: str,
              chosen: list[Variant] | None = None,
              progress: Callable[[str], None] | None = None) -> list[Result]:
     dates = ctx.schedule(strategy.every, start)
-    cut = pd.Timestamp(split)
+    cut = pd.Timestamp(split or strategy.split)
     out = []
     for v in chosen or variants(strategy):
         if progress:
             progress(v.id)
         rows = replay(ctx, strategy, v, dates)
-        # A tuning date whose holding ends after the split would let the test
-        # period's prices into the tuning: those dates are left out of both.
-        embargo = cut - pd.offsets.BDay(strategy.horizon + 1)
-        tune = [r for r in rows if pd.Timestamp(r.date) < embargo]
-        test = [r for r in rows if pd.Timestamp(r.date) >= cut]
-        out.append(Result(v, stats(tune, strategy), stats(test, strategy), rows[-3:]))
+        tune, test = _split(rows, cut, strategy.horizon)
+        result = Result(v, stats(tune, strategy), stats(test, strategy), rows[-3:])
+        for h in strategy.read_horizons:
+            rt, rs = _split(replay(ctx, strategy, v, dates, horizon=h), cut, h)
+            result.reads[h] = (stats(rt, strategy, h), stats(rs, strategy, h))
+        out.append(result)
     return out

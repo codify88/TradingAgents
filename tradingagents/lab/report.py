@@ -17,6 +17,9 @@ from .panel import lab_dir
 from .replay import OOS_T, SIGNALS, STRATEGIES, Result, Strategy, t_hurdle
 
 NULL_SIGNALS = ("random",)
+# Fewer non-overlapping holdings than this and a t-stat is not evidence: a
+# 3-year hold sampled monthly over eight years is about three independent bets.
+MIN_INDEPENDENT = 10
 
 
 def record_trials(config: dict, strategy: Strategy, results: list[Result]) -> int:
@@ -62,6 +65,13 @@ def verdict(strategy: Strategy, results: list[Result], trials: int) -> Verdict:
         return Verdict(strategy.name, None, trials, hurdle, False, False, "no variant could be scored")
     best = max(live, key=lambda r: r.tune.t)
     v = best.variant.id
+    thin = [f"{name} {s.independent:.0f}" for name, s in (("tuning", best.tune), ("test", best.test))
+            if not s.independent >= MIN_INDEPENDENT]
+    if thin:
+        why = (f"too few independent holdings to judge ({', '.join(thin)}; needs {MIN_INDEPENDENT} each): "
+               f"at a {strategy.horizon}-day hold this history cannot separate a signal from luck. "
+               f"The best on the tuning dates is {v}")
+        return Verdict(strategy.name, v, trials, hurdle, False, False, why)
     if best.tune.t < hurdle:
         why = (f"best on the tuning dates is {v} (t {best.tune.t:.2f}), under the {hurdle:.2f} "
                f"the {trials} variants tried require")
@@ -89,6 +99,10 @@ def _pct(x: float) -> str:
     return "—" if x is None or math.isnan(x) else f"{x:+.2%}"
 
 
+def _key(t: float) -> float:
+    return -99.0 if math.isnan(t) else t
+
+
 def _t(x: float) -> str:
     return "—" if math.isnan(x) else f"{x:.2f}"
 
@@ -102,11 +116,22 @@ def render(strategy: Strategy, results: list[Result], v: Verdict, split: str) ->
               f"S&P 500. t is Newey-West.", "",
               "| Variant | Tune n | Tune sel | Tune t | Test n | Test sel | Test t | Hit | Test net | Net t |",
               "|---|---|---|---|---|---|---|---|---|---|"]
-    for r in sorted(results, key=lambda r: -(r.tune.t if not math.isnan(r.tune.t) else -99)):
+    for r in sorted(results, key=lambda r: -_key(r.tune.t)):
         lines.append(
             f"| {r.variant.id} | {r.tune.n} | {_pct(r.tune.selection)} | {_t(r.tune.t)} | {r.test.n} "
             f"| {_pct(r.test.selection)} | {_t(r.test.t)} | {r.test.hit:.0%} | {_pct(r.test.net_vs_market)} "
             f"| {_t(r.test.t_net)} |")
+    for h in strategy.read_horizons:
+        lines += ["", f"### {h}-day read (no verdict; shorter holds, more independent ones)", "",
+                  "| Variant | Tune n | Tune sel | Tune t | Test n | Test sel | Test t | Hit | Test net |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for r in sorted(results, key=lambda r: -_key(r.reads[h][0].t)):
+            tu, te = r.reads[h]
+            lines.append(f"| {r.variant.id} | {tu.n} | {_pct(tu.selection)} | {_t(tu.t)} | {te.n} "
+                         f"| {_pct(te.selection)} | {_t(te.t)} | {te.hit:.0%} | {_pct(te.net_vs_market)} |")
+        first = results[0].reads[h]
+        lines.append(f"\nIndependent holdings at {h} days: about {first[0].independent:.0f} tuning, "
+                     f"{first[1].independent:.0f} test.")
     any_r = next((r for r in results if r.test.n), None)
     if any_r:
         s = any_r.test
@@ -118,6 +143,9 @@ def render(strategy: Strategy, results: list[Result], v: Verdict, split: str) ->
         worst = max(abs(r.tune.selection) for r in nulls if not math.isnan(r.tune.selection))
         lines += [f"Null check: the random ordering's selection is at most {_pct(worst)} on the tuning "
                   f"dates; it should be near zero."]
+    if any_r:
+        lines.append(f"Independent holdings at {strategy.horizon} days: about {any_r.tune.independent:.0f} "
+                     f"tuning, {any_r.test.independent:.0f} test.")
     lines += ["", "## Verdict", "", f"Trials counted for {strategy.name}: {v.trials} "
               f"(in-sample hurdle t {v.hurdle:.2f}).", "",
               ("**Suggest:** " if v.passes else "**No change suggested:** ") + v.reason + "."]

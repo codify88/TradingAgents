@@ -39,15 +39,49 @@ class FinancialsUnavailable(RuntimeError):
     """No usable statements for this ticker as of this date."""
 
 
+# Alpha Vantage sometimes answers a valid statement request with {"Error
+# Message": "Invalid API call"} and is fine seconds later (MSFT's cash flow and
+# XOM's balance sheet in one screen-lab run). Asked again before being believed.
+STATEMENT_RETRY_DELAYS = (2.0, 5.0)
+
+
+class _ErrorBody(Exception):
+    def __init__(self, body: str):
+        super().__init__(body[:200])
+        self.body = body
+
+
+def _is_error_body(body) -> bool:
+    return isinstance(body, str) and body.lstrip().startswith("{") and '"Error Message"' in body[:200]
+
+
 @functools.lru_cache(maxsize=128)
+def _fetch_answer(function: str, symbol: str) -> str:
+    body = _make_api_request(function, {"symbol": symbol})
+    if _is_error_body(body):
+        raise _ErrorBody(body)  # never memoised: lru_cache does not keep exceptions
+    return body
+
+
 def _fetch(function: str, symbol: str) -> str:
     """One Alpha Vantage payload, cached for the life of the process.
 
     Both value analysts read the same three statements; without the cache a run
-    would pay for each of them twice. Failures are not cached (lru_cache does
-    not memoise exceptions), so a rate-limited call is retried next time.
+    would pay for each of them twice. Failures are not cached, and an error body
+    is asked for again before it is returned, so one vendor hiccup is not a
+    company "without statements" for the rest of the process.
     """
-    return _make_api_request(function, {"symbol": symbol})
+    for delay in (*STATEMENT_RETRY_DELAYS, None):
+        try:
+            return _fetch_answer(function, symbol)
+        except _ErrorBody as exc:
+            if delay is None:
+                return exc.body
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+_fetch.cache_clear = _fetch_answer.cache_clear  # callers and tests that reset the cache
 
 
 def _to_float(value) -> float:

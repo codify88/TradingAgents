@@ -324,3 +324,22 @@ def test_store_stats_says_when_the_store_is_off():
 
     result = CliRunner().invoke(m.app, ["store-stats"])
     assert result.exit_code == 0 and "off" in result.output
+
+
+@pytest.mark.unit
+def test_prefer_stored_serves_an_old_row_and_still_fetches_a_new_one(store_on):
+    from datetime import timedelta
+
+    old = datetime.now(NY) - timedelta(days=30)
+    key = ds.params_key({"symbol": "IBM", "outputsize": "full", "datatype": "csv"})
+    store_on.put("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", key, "old body", symbol="IBM",
+                 final=False, fetched_at=old)
+    fetch, calls = _fetcher("new body")
+    params = {"symbol": "IBM", "outputsize": "full", "datatype": "csv"}
+    with ds.prefer_stored():
+        assert ds.through_store("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", params, fetch) == "old body"
+        assert ds.has_fresh("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", params)
+        assert ds.through_store("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", {"symbol": "KO"}, fetch) == "new body"
+    assert calls == [1]
+    # Outside it, the stale row is refetched as before.
+    assert ds.through_store("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", params, fetch) == "new body"

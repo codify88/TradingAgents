@@ -1835,10 +1835,37 @@ def lab_prices(
     console.print(f"Panel: {p.close.shape[1]:,} names x {p.close.shape[0]:,} days -> {path}")
 
 
+@lab_app.command(name="facts")
+def lab_facts(
+    strategy: str = typer.Option("value", "--strategy", help="A fundamentals strategy: value."),
+    start: str = typer.Option("2012-01-01", "--start", help="First schedule date."),
+    hours: float = typer.Option(None, "--hours", help="Stop after this long; run again to continue."),
+):
+    """Point-in-time statements, quality screens and cheapness for every name a value replay reads."""
+    from tradingagents.lab import fundamentals as fu, panel, replay
+
+    spec = replay.STRATEGIES[strategy]
+    p = panel.load_panel(DEFAULT_CONFIG)
+    if p is None or not spec.fundamentals:
+        console.print("[red]Needs the price panel (`lab prices`) and a fundamentals strategy.[/red]")
+        raise typer.Exit(code=1)
+    ctx = replay.Context(p, panel.universes(DEFAULT_CONFIG, dates=[]))
+    dates = ctx.schedule(spec.every, start)
+    pairs = fu.needed(ctx, dates, max(x or 0 for x in spec.pools), min(spec.min_dollar_volume),
+                      horizon=min((spec.horizon, *spec.read_horizons)))
+    deadline = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=hours)) if hours else None
+    r = fu.fill(DEFAULT_CONFIG, pairs, deadline=deadline,
+                progress=lambda n, t: console.print(f"[dim]{n:,} / {t:,}[/dim]"))
+    c = fu.coverage(fu.load_facts(DEFAULT_CONFIG), pairs)
+    console.print(f"Computed {r.computed:,} of {r.needed:,} due ({r.stopped}); {r.vendor_errors:,} vendor errors. "
+                  f"Coverage: {c['computed']:,} of {c['pairs']:,} (symbol, date) pairs, {c['judged']:,} judged, "
+                  f"median {c['median_years']:.0f} years of history.")
+
+
 @lab_app.command(name="run")
 def lab_run(
-    strategy: str = typer.Option("standard", "--strategy", help="standard | momentum"),
-    split: str = typer.Option("2020-01-01", "--split", help="Tune before this date, test from it."),
+    strategy: str = typer.Option("standard", "--strategy", help="standard | momentum | value"),
+    split: str = typer.Option(None, "--split", help="Tune before this date, test from it (default: the strategy's)."),
     start: str = typer.Option("2012-01-01", "--start", help="First schedule date."),
 ):
     """Replay every variant, count them as trials, and suggest a change only if one clears the bar."""
@@ -1853,11 +1880,18 @@ def lab_run(
         raise typer.Exit(code=1)
     spec = replay.STRATEGIES[strategy]
     ctx = replay.Context(p, panel.universes(DEFAULT_CONFIG, dates=[]))
+    if spec.fundamentals:
+        from tradingagents.lab import fundamentals as fu
+
+        ctx.set_facts(fu.load_facts(DEFAULT_CONFIG))
+        if not ctx.facts:
+            console.print(f"[red]No value facts yet: run `tradingagents lab facts --strategy {strategy}` first.[/red]")
+            raise typer.Exit(code=1)
     results = replay.evaluate(ctx, spec, split, start, progress=lambda v: console.print(f"[dim]{v}[/dim]"))
     trials = report.record_trials(DEFAULT_CONFIG, spec, results)
     v = report.verdict(spec, results, trials)
     report.save_suggestion(DEFAULT_CONFIG, v)
-    text = report.render(spec, results, v, split)
+    text = report.render(spec, results, v, split or spec.split)
     out = panel.lab_dir(DEFAULT_CONFIG) / f"{strategy}-report.md"
     out.write_text(text)
     console.print(Markdown(text))

@@ -210,3 +210,20 @@ class TestStoreBackedDaily:
             pass
         assert not old.exists() and fresh.exists()
         assert not (tmp_path / "av_daily" / "X.csv.gz").exists()
+
+
+class TestStatementErrorBody:
+    def test_an_error_body_is_retried_and_never_cached(self, monkeypatch):
+        monkeypatch.setattr(fin, "STATEMENT_RETRY_DELAYS", (0.0, 0.0))
+        fin._fetch.cache_clear()
+        answers = iter(['{"Error Message": "Invalid API call"}', '{"annualReports": []}'])
+        with patch.object(fin, "_make_api_request", side_effect=lambda *a: next(answers)) as req:
+            assert fin._fetch("CASH_FLOW", "MSFT") == '{"annualReports": []}'
+            assert fin._fetch("CASH_FLOW", "MSFT") == '{"annualReports": []}'  # now cached
+        assert req.call_count == 2
+        fin._fetch.cache_clear()
+        with patch.object(fin, "_make_api_request", return_value='{"Error Message": "x"}') as req:
+            assert "Error Message" in fin._fetch("CASH_FLOW", "DEAD")
+            assert "Error Message" in fin._fetch("CASH_FLOW", "DEAD")
+        assert req.call_count == 2 * (1 + len(fin.STATEMENT_RETRY_DELAYS))
+        fin._fetch.cache_clear()

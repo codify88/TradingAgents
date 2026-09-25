@@ -11,15 +11,20 @@ read at call time so a test or a one-off command can switch it):
   run this way provably used nothing new;
 - ``off``: no store, no throttle -- the behaviour before the store existed.
 
+Inside ``prefer_stored()`` any stored row is served whatever its age: for the
+screen lab, which replays past dates and needs history, not today's copy.
+
 Design: docs/design/llmquant.md, layer 1.
 """
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,7 +32,20 @@ from .policy import NEW_YORK, is_fresh, policy_for
 from .store import DataStore, params_key
 from .throttle import acquire
 
-__all__ = ["DataStore", "ReplayMissError", "get_store", "has_fresh", "store_mode", "through_store"]
+__all__ = ["DataStore", "ReplayMissError", "get_store", "has_fresh", "prefer_stored", "store_mode",
+           "through_store"]
+
+_PREFER_STORED = contextvars.ContextVar("prefer_stored", default=False)
+
+
+@contextlib.contextmanager
+def prefer_stored() -> Iterator[None]:
+    """Serve any stored row, however old; fetch only what was never stored."""
+    token = _PREFER_STORED.set(True)
+    try:
+        yield
+    finally:
+        _PREFER_STORED.reset(token)
 
 MODES = ("read_write", "replay", "off")
 
@@ -95,7 +113,7 @@ def through_store(vendor: str, endpoint: str, params: dict, fetch: Callable[[], 
 
     row = store.get(vendor, endpoint, key)
     # A row stored as final is served forever; anything else by the current policy.
-    if row is not None and (row[2] or is_fresh(policy, row[1], now)):
+    if row is not None and (row[2] or _PREFER_STORED.get() or is_fresh(policy, row[1], now)):
         store.count(vendor, endpoint, "hit", day)
         return row[0]
     if mode == "replay":
@@ -123,4 +141,5 @@ def has_fresh(vendor: str, endpoint: str, params: dict) -> bool:
         return False
     row = get_store(config).get(vendor, endpoint, params_key(params))
     now = datetime.now(UTC)
-    return row is not None and (row[2] or is_fresh(policy_for(endpoint, params, now), row[1], now))
+    return row is not None and (row[2] or _PREFER_STORED.get()
+                                or is_fresh(policy_for(endpoint, params, now), row[1], now))

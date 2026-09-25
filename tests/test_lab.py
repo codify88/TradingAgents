@@ -82,8 +82,8 @@ def test_newey_west_widens_for_overlap_and_hurdle_rises_with_trials():
 
 
 def _result(signal, tune_t, test_sel, test_t, net=0.001):
-    s = rp.Stats(100, 0.01, tune_t, 0.6, 0.0, 1.0, 0.0, 0.0, 0.0)
-    t = rp.Stats(50, test_sel, test_t, 0.6, net, 1.0, 0.0, 0.0, 0.0)
+    s = rp.Stats(100, 0.01, tune_t, 0.6, 0.0, 1.0, 0.0, 0.0, 0.0, independent=100)
+    t = rp.Stats(50, test_sel, test_t, 0.6, net, 1.0, 0.0, 0.0, 0.0, independent=50)
     return rp.Result(rp.Variant(signal, 8, 5e6), s, t)
 
 
@@ -167,3 +167,68 @@ def test_a_pool_ranks_only_within_the_most_liquid_names():
     assert rows and all(r.eligible == 4 for r in rows)
     assert {s for r in rows for s in r.chosen} <= {"N08", "N09", "N10", "N11"}
     assert rp.Variant("random", 2, 1e6, pool=4).id.endswith("/top4")
+
+
+VAL = rp.Strategy("v", 5, "SPY", "week", ("fcf_pct",), picks=(2,), min_dollar_volume=(1e6,),
+                  pools=(None,), fundamentals=True, qualities=(True, False))
+
+
+def _facts_for(ctx, dates, value, tripped=(), error=()):
+    from tradingagents.lab.fundamentals import Facts
+
+    out = {}
+    for i in dates:
+        day = ctx.dates[i].strftime("%Y-%m-%d")
+        for s in ctx.symbols:
+            s = str(s)
+            if s in ("SPY", "RSP"):
+                continue
+            out[(s, day)] = Facts(tripped=["debt"] if s in tripped else [], values={"fcf_pct": value(s)},
+                                  years=8, error="fundamentals unavailable" if s in error else "")
+    return out
+
+
+def test_value_ranks_on_facts_and_applies_the_quality_exclusions():
+    p = _panel(n_names=8)
+    ctx = rp.Context(p, _unis(p))
+    dates = ctx.schedule("week", "2015-01-01")
+    ctx.set_facts(_facts_for(ctx, dates, lambda s: int(s[1:]), tripped={"N07"}, error={"N06"}))
+    with_q = rp.replay(ctx, VAL, rp.Variant("fcf_pct", 2, 1e6), dates)
+    assert with_q and all(r.chosen == ["N05", "N04"] and r.eligible == 6 for r in with_q)
+    no_q = rp.replay(ctx, VAL, rp.Variant("fcf_pct", 2, 1e6, quality=False), dates)
+    assert all(r.chosen == ["N07", "N05"] and r.eligible == 7 for r in no_q)
+    assert rp.Variant("fcf_pct", 2, 1e6, quality=False).id.endswith("/noq")
+    assert len(rp.variants(VAL)) == 2
+
+
+def test_a_verdict_needs_enough_independent_holdings():
+    spec = rp.STRATEGIES["value"]
+    r = _result("fcf_pct", 9.0, 0.05, 5.0)
+    r.test.independent = 2
+    v = lr.verdict(spec, [r], trials=10)
+    assert not v.passes and "too few independent holdings" in v.reason
+
+
+def test_facts_are_filled_once_by_symbol_and_vendor_errors_retried(tmp_path):
+    from tradingagents.lab import fundamentals as fu
+
+    config = {"data_cache_dir": str(tmp_path)}
+    calls, b_tries = [], []
+
+    def compute(symbol, day):
+        calls.append((symbol, day))
+        if symbol == "B":
+            b_tries.append(1)
+            if len(b_tries) == 1:  # the vendor fails the first time only
+                return fu.Facts(error="fundamentals unavailable (Invalid API call)", vendor=True)
+        return fu.Facts()
+
+    pairs = [("B", "2015-01-02"), ("A", "2015-01-02"), ("A", "2015-02-02"), ("A", "2015-01-02")]
+    r = fu.fill(config, pairs, compute_one=compute)
+    assert calls == [("A", "2015-01-02"), ("A", "2015-02-02"), ("B", "2015-01-02")]
+    assert r.computed == 3 and r.vendor_errors == 1
+    calls.clear()
+    fu.fill(config, pairs, compute_one=compute)
+    assert calls == [("B", "2015-01-02")]  # only the vendor error is asked again
+    c = fu.coverage(fu.load_facts(config), pairs)
+    assert c["judged"] == 3 and c["vendor_errors"] == 0
