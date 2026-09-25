@@ -15,6 +15,7 @@ Design: docs/design/llmquant.md, "The entity graph".
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -84,10 +85,8 @@ def fill_insider(store, symbol: str, body: str, today: str | None = None) -> int
         nodes[person] = (person, "insider", {"name": r.get("executive")})
         t = trades.setdefault((person, day, side), {"title": r.get("executive_title"), "shares": 0.0,
                                                      "rows": 0, "price": r.get("share_price")})
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             t["shares"] += float(r.get("shares") or 0)
-        except (TypeError, ValueError):
-            pass
         t["rows"] += 1
     conn = store._conn()
     conn.execute("DELETE FROM edge WHERE dst=? AND source='INSIDER_TRANSACTIONS'", (_ticker(symbol),))
