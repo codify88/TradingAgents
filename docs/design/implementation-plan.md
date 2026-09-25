@@ -5,6 +5,19 @@ harvest, knowledge layer, strategy intake) and `hermes.md` (operator agent,
 outcome-graded learning) as one piece of work, because they share more than
 they differ.
 
+## Progress (2026-09-25)
+
+| Wave | Stream | State |
+|---|---|---|
+| 0 | decisions, usage baseline, designs committed | done |
+| 1 | A data store + throttle | built; first real night 2026-09-26 |
+| 1 | B MCP server, Hermes operator, 08:00 report | built; report delivered on demand, first scheduled 2026-09-26 08:00 |
+| 1 | S platform service (wake daemon, chain runner) | installed; needs two on-time nights with the lid closed |
+| 2 | C harvest, graph, point-in-time tools | built; first run 2026-09-26 after the nightly job (25,000 requests) |
+| 2 | D evaluation harness + nightly queue (5 names: 2 backlog, 3 trials) | built; no trial registered yet |
+| 2 | E exit-rule study | built; first run: holding beat every exit for value (12 calls) and momentum-LEAPS (21) |
+| 3-5 | F-K | not started |
+
 ## What the two designs share
 
 Built once, used by both:
