@@ -27,6 +27,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
+    # Point-in-time vendor store (tradingagents/datastore): read_write | replay | off.
+    "TRADINGAGENTS_DATA_STORE":              "data_store",
+    "TRADINGAGENTS_AV_REQUESTS_PER_MINUTE":  "av_requests_per_minute",
 }
 
 
@@ -74,6 +77,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
+    # Point-in-time store of raw vendor responses (docs/design/llmquant.md,
+    # layer 1). read_write serves fresh rows and stores fetches; replay never
+    # fetches; off bypasses it. The path defaults to data_cache_dir/store.sqlite.
+    "data_store": "read_write",
+    "data_store_path": None,
+    # Alpha Vantage requests per minute on our plan (decided 2026-09-25), shared
+    # by every process through the store's throttle.
+    "av_requests_per_minute": 150,
     "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
     # Optional cap on the number of resolved memory log entries. When set,
     # the oldest resolved entries are pruned once this limit is exceeded.

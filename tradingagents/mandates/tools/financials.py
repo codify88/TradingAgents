@@ -12,9 +12,7 @@ easier, not harder (docs/design/mandates.md, rule 3).
 from __future__ import annotations
 
 import contextlib
-import datetime
 import functools
-import gzip
 import json
 import logging
 import time
@@ -357,56 +355,40 @@ DAILY_JSON_RETRY_DELAYS = (2.0, 5.0)
 
 @contextlib.contextmanager
 def daily_disk_cache(directory):
-    """Keep daily histories under ``directory`` for the duration of the block.
+    """Retired: daily histories live in the point-in-time store now.
 
-    Restores whatever was set before on exit, so a screen run inside a longer
-    process -- or a test -- leaves no process-wide cache switched on behind it.
+    Kept so callers need not change. It writes nothing; it only ages out the
+    legacy ``av_daily`` files as before, so that directory drains within
+    ``DAILY_CACHE_KEEP_DAYS`` and can then be deleted.
     """
-    global _daily_cache_dir
-    previous = _daily_cache_dir
-    _daily_cache_dir = Path(directory) / "av_daily" if directory else None
-    if _daily_cache_dir is not None:
-        _daily_cache_dir.mkdir(parents=True, exist_ok=True)
+    legacy = Path(directory) / "av_daily" if directory else None
+    if legacy is not None and legacy.is_dir():
         cutoff = time.time() - DAILY_CACHE_KEEP_DAYS * 86400
-        for old in _daily_cache_dir.glob("*.csv.gz"):
+        for old in legacy.glob("*.csv.gz"):
             if old.stat().st_mtime < cutoff:
                 old.unlink(missing_ok=True)
-    try:
-        yield
-    finally:
-        _daily_cache_dir = previous
+    yield
 
 
-def _cached_daily_path(symbol: str) -> Path | None:
-    if _daily_cache_dir is None:
-        return None
-    return _daily_cache_dir / f"{symbol}.csv.gz"
+def _daily_params(symbol: str) -> dict:
+    return {"symbol": symbol, "outputsize": "full", "datatype": "csv"}
 
 
 def daily_is_cached(symbol: str) -> bool:
-    """Whether today's history for ``symbol`` is already on disk (no request needed).
+    """Whether today's history for ``symbol`` would be served without a request.
 
-    Both dates are local: a file's mtime read as UTC and compared with a local
-    "today" is a day out for part of every evening -- after 20:00 in New York a
-    file written seconds ago looked like tomorrow's, and yesterday's looked
-    like today's.
+    The point-in-time store holds it now (one fetch per symbol per New York
+    trading date); this asks the store, so the screener's limiter can skip a
+    symbol that costs no request.
     """
-    path = _cached_daily_path(symbol.strip().upper())
-    if not (path and path.exists()):
-        return False
-    written = datetime.datetime.fromtimestamp(path.stat().st_mtime)
-    return written.date() == datetime.date.today()
+    from tradingagents.datastore import has_fresh
+
+    return has_fresh("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", _daily_params(symbol.strip().upper()))
 
 
 def _daily_csv(symbol: str):
-    """The TIME_SERIES_DAILY_ADJUSTED body for ``symbol``, from today's disk copy if any."""
-    path = _cached_daily_path(symbol)
-    if path is not None and daily_is_cached(symbol):
-        return gzip.decompress(path.read_bytes()).decode()
-    body = _make_api_request(
-        "TIME_SERIES_DAILY_ADJUSTED",
-        {"symbol": symbol, "outputsize": "full", "datatype": "csv"},
-    )
+    """The TIME_SERIES_DAILY_ADJUSTED body for ``symbol`` (the store serves today's copy)."""
+    body = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", _daily_params(symbol))
     # A JSON body means "no such symbol" -- except when it does not: Alpha
     # Vantage occasionally answers a valid symbol with {"Error Message":
     # "Invalid API call"} (EPRT, GLBS and VRT once in a 5,250-name screen, all
@@ -416,14 +398,7 @@ def _daily_csv(symbol: str):
         if not (isinstance(body, str) and body.lstrip().startswith("{")):
             break
         time.sleep(delay)
-        body = _make_api_request(
-            "TIME_SERIES_DAILY_ADJUSTED",
-            {"symbol": symbol, "outputsize": "full", "datatype": "csv"},
-        )
-    if path is not None and isinstance(body, str) and body.startswith("timestamp,"):
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(gzip.compress(body.encode()))
-        tmp.replace(path)
+        body = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", _daily_params(symbol))
     return body
 
 

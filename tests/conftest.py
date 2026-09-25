@@ -75,6 +75,18 @@ _API_KEY_ENV_VARS = (
 
 
 @pytest.fixture(autouse=True)
+def _no_data_store(monkeypatch):
+    """Keep the point-in-time store out of the suite unless a test asks for it.
+
+    On by default in real runs, it would otherwise write into the developer's
+    ``~/.tradingagents/cache`` and serve a second mocked request from the first,
+    breaking every test that counts vendor calls. Store tests set the variable
+    back themselves, against a temporary path.
+    """
+    monkeypatch.setenv("TRADINGAGENTS_DATA_STORE", "off")
+
+
+@pytest.fixture(autouse=True)
 def _dummy_api_keys(monkeypatch):
     for env_var in _API_KEY_ENV_VARS:
         # `or` not a .get default: an env var present but empty (e.g. a key left

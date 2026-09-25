@@ -125,71 +125,87 @@ class TestTransientErrorBody:
         assert req.call_count == 1 + len(fin.DAILY_JSON_RETRY_DELAYS)
 
 
-class TestDiskCache:
-    def test_off_by_default(self, tmp_path):
-        assert fin._daily_cache_dir is None
-        with patch.object(fin, "_make_api_request", return_value=CSV):
-            fin.alpha_vantage_daily_strict("X")
-        assert not list(tmp_path.rglob("*.gz"))
+class TestStoreBackedDaily:
+    """Daily histories live in the point-in-time store (the av_daily file cache
+    is retired): one fetch per symbol per New York date, and a stored day costs
+    the screener's limiter nothing."""
 
-    def test_a_cached_day_needs_no_request_and_skips_the_limiter(self, tmp_path):
-        with fin.daily_disk_cache(tmp_path):
-            with patch.object(fin, "_make_api_request", return_value=CSV):
-                fin.alpha_vantage_daily_strict("X")
-            fin.alpha_vantage_daily_strict.cache_clear()
-            assert fin.daily_is_cached("X")
+    @pytest.fixture
+    def store_on(self, tmp_path, monkeypatch):
+        import tradingagents.datastore as ds
 
-            class Limiter:
-                calls = 0
+        monkeypatch.setenv("TRADINGAGENTS_DATA_STORE", "read_write")
+        monkeypatch.setattr(ds, "_config", lambda: {
+            "data_cache_dir": str(tmp_path), "data_store_path": None, "av_requests_per_minute": 0})
+        ds._stores.clear()
+        fin.alpha_vantage_daily_strict.cache_clear()
+        yield ds.get_store()
+        ds._stores.clear()
+        fin.alpha_vantage_daily_strict.cache_clear()
 
-                def acquire(self, n=1):
-                    Limiter.calls += 1
+    @staticmethod
+    def _fetch(monkeypatch, *bodies):
+        import tradingagents.dataflows.alpha_vantage_common as av
 
-            with patch.object(fin, "_make_api_request", side_effect=AssertionError("fetched")):
-                data = prices.download_av(["X"], "2024-06-01", "2024-06-12", limiter=Limiter())
+        calls = []
+        answers = iter(bodies)
+
+        def fetch(function_name, params):
+            calls.append(params["symbol"])
+            return next(answers)
+
+        monkeypatch.setattr(av, "_fetch", fetch)
+        return calls
+
+    def test_nothing_is_stored_with_the_store_off(self, monkeypatch):
+        calls = self._fetch(monkeypatch, CSV)
+        fin.alpha_vantage_daily_strict("X")
+        assert calls == ["X"] and not fin.daily_is_cached("X")
+
+    def test_a_stored_day_needs_no_request_and_skips_the_limiter(self, store_on, monkeypatch):
+        calls = self._fetch(monkeypatch, CSV)
+        fin.alpha_vantage_daily_strict("X")
+        fin.alpha_vantage_daily_strict.cache_clear()
+        assert fin.daily_is_cached("X")
+
+        class Limiter:
+            calls = 0
+
+            def acquire(self, n=1):
+                Limiter.calls += 1
+
+        data = prices.download_av(["X"], "2024-06-01", "2024-06-12", limiter=Limiter())
         assert "X" in data.frames
-        assert Limiter.calls == 0
+        assert Limiter.calls == 0 and calls == ["X"]
 
-    def test_freshness_is_judged_in_local_time(self, tmp_path):
-        """An mtime read as UTC against a local "today" is a day out every
-        evening: after 20:00 in New York a file just written read as stale."""
-        with fin.daily_disk_cache(tmp_path):
-            with patch.object(fin, "_make_api_request", return_value=CSV):
-                fin.alpha_vantage_daily_strict("X")
-            path = tmp_path / "av_daily" / "X.csv.gz"
-            for hour in (0, 9, 21, 23):
-                when = datetime.datetime.combine(datetime.date.today(), datetime.time(hour)).timestamp()
-                os.utime(path, (when, when))
-                assert fin.daily_is_cached("X"), hour
+    def test_yesterdays_copy_is_refetched(self, store_on, monkeypatch):
+        from tradingagents.datastore.store import params_key
 
-    def test_yesterdays_copy_is_refetched(self, tmp_path):
-        with fin.daily_disk_cache(tmp_path):
-            with patch.object(fin, "_make_api_request", return_value=CSV):
-                fin.alpha_vantage_daily_strict("X")
-            path = tmp_path / "av_daily" / "X.csv.gz"
-            day_ago = time.time() - 86400
-            os.utime(path, (day_ago, day_ago))
-            assert not fin.daily_is_cached("X")
+        store_on.put("alpha_vantage", "TIME_SERIES_DAILY_ADJUSTED", params_key(fin._daily_params("X")),
+                     CSV, symbol="X", final=False,
+                     fetched_at=datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1, hours=1))
+        assert not fin.daily_is_cached("X")
+        calls = self._fetch(monkeypatch, CSV)
+        fin.alpha_vantage_daily_strict("X")
+        assert calls == ["X"]
 
-    def test_an_error_body_is_never_written(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(fin, "DAILY_JSON_RETRY_DELAYS", ())
-        with fin.daily_disk_cache(tmp_path), \
-                patch.object(fin, "_make_api_request", return_value='{"Error Message": "x"}'):
-            assert fin.alpha_vantage_daily_strict("X").empty
-        assert not (tmp_path / "av_daily" / "X.csv.gz").exists()
+    def test_a_one_off_error_body_is_retried_not_stored(self, store_on, monkeypatch):
+        """A stored error would answer the retry; the store never keeps one."""
+        monkeypatch.setattr(fin, "DAILY_JSON_RETRY_DELAYS", (0.0,))
+        calls = self._fetch(monkeypatch, '{"Error Message": "Invalid API call"}', CSV)
+        assert not fin.alpha_vantage_daily_strict("VRT").empty
+        assert calls == ["VRT", "VRT"]
+        assert fin.daily_is_cached("VRT")
 
-    def test_the_block_restores_the_previous_setting(self, tmp_path):
-        with fin.daily_disk_cache(tmp_path):
-            assert fin._daily_cache_dir == tmp_path / "av_daily"
-        assert fin._daily_cache_dir is None
-
-    def test_old_copies_are_purged(self, tmp_path):
+    def test_the_legacy_directory_drains(self, tmp_path):
         d = tmp_path / "av_daily"
         d.mkdir()
-        old = d / "OLD.csv.gz"
+        old, fresh = d / "OLD.csv.gz", d / "NEW.csv.gz"
         old.write_bytes(b"x")
+        fresh.write_bytes(b"x")
         week_ago = time.time() - 7 * 86400
         os.utime(old, (week_ago, week_ago))
         with fin.daily_disk_cache(tmp_path):
             pass
-        assert not old.exists()
+        assert not old.exists() and fresh.exists()
+        assert not (tmp_path / "av_daily" / "X.csv.gz").exists()

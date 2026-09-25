@@ -112,7 +112,24 @@ def _fetch_json(url: str) -> dict:
         raise VendorRateLimitError("SEC EDGAR returned an unreadable response") from exc
 
 
+# SEC asks for no more than 10 requests a second; stay well under it.
+EDGAR_REQUESTS_PER_MINUTE = 300
+
+
 def _cached_json(url: str, name: str) -> dict:
+    """A public EDGAR document through the point-in-time store: one fetch per
+    document per New York date, as the old day-long file cache did.
+
+    With the store off it falls back to that file cache, so ``data_store: off``
+    keeps today's behaviour exactly."""
+    from tradingagents.datastore import store_mode, through_store
+
+    if store_mode() != "off":
+        body = through_store("sec_edgar", name, {"url": url},
+                             lambda: json.dumps(_fetch_json(url)),
+                             per_minute=EDGAR_REQUESTS_PER_MINUTE)
+        return json.loads(body)
+
     path = Path(get_config()["data_cache_dir"]) / "sec_edgar" / name
     if path.exists() and time.time() - path.stat().st_mtime < _CACHE_TTL_SECONDS:
         try:

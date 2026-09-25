@@ -1553,6 +1553,48 @@ def screen_run_command(
         raise typer.Exit(code=2)
 
 
+@app.command(name="store-stats")
+def store_stats(
+    day: str = typer.Option(None, "--day", help="New York date, YYYY-MM-DD; default today."),
+):
+    """Show the point-in-time store: size, and the day's requests served vs fetched."""
+    from datetime import UTC, datetime
+
+    from rich import box
+    from rich.table import Table
+
+    from tradingagents.datastore import get_store, store_mode, store_path
+    from tradingagents.datastore.policy import NEW_YORK
+
+    mode = store_mode()
+    if mode == "off":
+        console.print("Data store: off (data_store / TRADINGAGENTS_DATA_STORE).")
+        return
+    store = get_store()
+    stats = store.stats()
+    day = day or datetime.now(UTC).astimezone(NEW_YORK).date().isoformat()
+    console.print(
+        f"Data store ({mode}) {store_path()}: {stats['bytes'] / 1e6:,.1f} MB, "
+        f"{stats['responses']:,} responses ({stats['final']:,} final), "
+        f"{stats['snapshots']:,} snapshots."
+    )
+    counts = store.counts(day)
+    if not counts:
+        console.print(f"No requests recorded for {day}.")
+        return
+    table = Table(title=f"Requests on {day}", box=box.SIMPLE)
+    for column in ("Vendor", "Endpoint", "Asked", "Served from store", "Fetched"):
+        table.add_column(column, justify="left" if column in ("Vendor", "Endpoint") else "right")
+    asked = served = fetched = 0
+    for (vendor, endpoint), c in counts.items():
+        hit, fetch = c.get("hit", 0), c.get("fetch", 0)
+        asked, served, fetched = asked + hit + fetch, served + hit, fetched + fetch
+        table.add_row(vendor, endpoint, f"{hit + fetch:,}", f"{hit:,}", f"{fetch:,}")
+    table.add_row("", "total", f"{asked:,}", f"{served:,}", f"{fetched:,}")
+    console.print(table)
+    console.print(f"{served / asked:.0%} of requests served without a fetch." if asked else "")
+
+
 @app.command(name="screen-review")
 def screen_review(
     mandate: str = typer.Option(

@@ -67,27 +67,38 @@ class AlphaVantageRateLimitError(VendorRateLimitError):
 def _make_api_request(function_name: str, params: dict) -> dict | str:
     """Helper function to make API requests and handle responses.
 
+    Every request goes through the point-in-time store (``tradingagents.datastore``):
+    a fresh stored response is served without a request, and a real request
+    waits on the shared throttle. Only a response that passed the notice checks
+    below is ever stored.
+
     Raises:
         AlphaVantageRateLimitError: When API rate limit is exceeded
     """
+    from tradingagents.datastore import through_store
+
     # Create a copy of params to avoid modifying the original
-    api_key = get_api_key()
-    api_params = params.copy()
-    api_params.update({
-        "function": function_name,
-        "apikey": api_key,
-        "source": "trading_agents",
-    })
+    request_params = params.copy()
 
     # Handle entitlement parameter if present in params or global variable
     current_entitlement = globals().get('_current_entitlement')
-    entitlement = api_params.get("entitlement") or current_entitlement
+    entitlement = request_params.get("entitlement") or current_entitlement
 
     if entitlement:
-        api_params["entitlement"] = entitlement
-    elif "entitlement" in api_params:
+        request_params["entitlement"] = entitlement
+    elif "entitlement" in request_params:
         # Remove entitlement if it's None or empty
-        api_params.pop("entitlement", None)
+        request_params.pop("entitlement", None)
+
+    return through_store("alpha_vantage", function_name, request_params,
+                         lambda: _fetch(function_name, request_params))
+
+
+def _fetch(function_name: str, request_params: dict) -> str:
+    """One real request to Alpha Vantage, with its notices classified."""
+    api_key = get_api_key()
+    api_params = {**request_params, "function": function_name,
+                  "apikey": api_key, "source": "trading_agents"}
 
     response = get_scrubbed(
         API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT, secret=api_key

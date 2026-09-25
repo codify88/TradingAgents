@@ -67,6 +67,10 @@ echo "--- summary ---"
 "$TRADINGAGENTS" screen-review --mandate "$MANDATE" < /dev/null || true
 
 echo
+echo "--- data store ---"
+"$TRADINGAGENTS" store-stats < /dev/null || true
+
+echo
 echo "=== finished $(date +%H:%M:%S), screen-run exit=$STATUS ==="
 echo "Read the reports with: tradingagents report"
 
