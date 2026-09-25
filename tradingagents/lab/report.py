@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from .panel import lab_dir
-from .replay import OOS_T, SIGNALS, Result, Strategy, t_hurdle
+from .replay import OOS_T, SIGNALS, STRATEGIES, Result, Strategy, t_hurdle
 
 NULL_SIGNALS = ("random",)
 
@@ -126,4 +126,38 @@ def render(strategy: Strategy, results: list[Result], v: Verdict, split: str) ->
                      "dates; useful as a screen, not yet as a trading rule on its own.")
     lines += ["", "Signals: " + "; ".join(f"`{k}` {d}" for k, d in SIGNALS.items()
                                          if any(r.variant.signal == k for r in results)) + "."]
+    return "\n".join(lines)
+
+
+def open_suggestions(config: dict) -> list[dict]:
+    """The latest passing suggestion per strategy that is not already in force."""
+    from .adopted import current
+
+    path = lab_dir(config) / "suggestions.jsonl"
+    try:
+        rows = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+    except OSError:
+        return []
+    latest: dict[str, dict] = {}
+    for r in rows:
+        latest[r["strategy"]] = r
+    out = []
+    for key, r in latest.items():
+        strategy = next((k for k, s in STRATEGIES.items() if s.name == key), key)
+        live = current(config, strategy)
+        if live and live["variant"] == r["candidate"]:
+            continue
+        out.append({**r, "strategy_key": strategy})
+    return out
+
+
+def render_suggestions(config: dict) -> str:
+    rows = open_suggestions(config)
+    if not rows:
+        return "No open suggestions: nothing in the lab has cleared the bar that is not already in use."
+    lines = []
+    for r in rows:
+        lines.append(f"{r['strategy_key']}: adopt {r['candidate']} -- {r['reason']}."
+                     + ("" if r["tradeable"] else " (Beats the pool, not yet the S&P 500 after costs.)")
+                     + f"\n  tradingagents lab adopt {r['strategy_key']} {r['candidate']}")
     return "\n".join(lines)

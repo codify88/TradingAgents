@@ -143,3 +143,16 @@ def test_fetch_missing_remembers_absent_symbols_and_keeps_to_budget(tmp_path, mo
     asked.clear()
     lp.fetch_missing(config, ["GONE"], max_requests=10, fetch=fetch)
     assert asked == []
+
+
+def test_a_passing_suggestion_stays_open_until_adopted(tmp_path):
+    from tradingagents.lab import adopted
+
+    config = {"data_cache_dir": str(tmp_path)}
+    spec = rp.STRATEGIES["standard"]
+    assert "No open suggestions" in lr.render_suggestions(config)
+    v = lr.verdict(spec, [_result("reversal_5d", 9.0, 0.004, 3.0)], trials=10)
+    lr.save_suggestion(config, v)
+    assert "lab adopt standard reversal_5d/p8/dv5m" in lr.render_suggestions(config)
+    adopted.adopt(config, "standard", "reversal_5d/p8/dv5m")
+    assert lr.open_suggestions(config) == []

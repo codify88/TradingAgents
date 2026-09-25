@@ -350,6 +350,14 @@ def trade_status() -> str:
     return ex.status(_config(), broker) + "\n\n" + (pl.render(pending) if pending else "No pending order plan.")
 
 
+def suggestions() -> str:
+    """Screen changes the lab can back with evidence (cleared the bar on held-out dates)
+    that are not in use yet. Adopting one is done at the terminal."""
+    from tradingagents.lab.report import render_suggestions
+
+    return render_suggestions(_config())
+
+
 def submit_order_plan(plan_id: str) -> str:
     """Send a pending order plan's market-on-open orders to the paper account. Refused if
     the plan expired, trading is halted, or reconciliation found an unacknowledged mismatch."""
@@ -376,5 +384,6 @@ def halt_trading(reason: str = "operator via Hermes") -> str:
 
 
 READ_TOOLS = (nightly_status, recent_decisions, screen_review, list_decisions, get_report,
-              pending_reviews, data_store_stats, harvest_status, job_status, trade_status)
+              pending_reviews, data_store_stats, harvest_status, job_status, trade_status,
+              suggestions)
 ACTION_TOOLS = (screen_run, retry_failed, submit_order_plan, halt_trading)

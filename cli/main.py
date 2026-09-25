@@ -1894,6 +1894,14 @@ def lab_show(strategy: str = typer.Option("standard", "--strategy")):
                   else "\nLive screen uses: the default (nothing adopted).")
 
 
+@app.command(name="suggest")
+def suggest_command():
+    """Changes the lab can back with evidence that are not in use yet (adopt with `lab adopt`)."""
+    from tradingagents.lab.report import render_suggestions
+
+    console.print(render_suggestions(DEFAULT_CONFIG))
+
+
 trade_app = typer.Typer(help="Paper execution for the standard strategy: plans, approval, halt, reconcile.")
 app.add_typer(trade_app, name="trade")
 
