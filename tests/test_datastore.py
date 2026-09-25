@@ -233,13 +233,27 @@ class _Clock:
 
 
 @pytest.mark.unit
-def test_the_throttle_allows_a_burst_then_paces(tmp_path):
+def test_the_throttle_allows_a_small_burst_then_paces(tmp_path):
     store = DataStore(tmp_path / "s.sqlite")
     clock = _Clock()
-    for _ in range(15):  # 10% of 150/min
+    for _ in range(3):
         assert acquire(store._conn(), "av", 150, clock=clock, sleep=clock.sleep) == 0
     waited = acquire(store._conn(), "av", 150, clock=clock, sleep=clock.sleep)
-    assert waited == pytest.approx(60 / 150)
+    assert waited == pytest.approx(60 / 147)
+
+
+@pytest.mark.unit
+def test_no_rolling_minute_ever_exceeds_the_limit(tmp_path):
+    """The vendor counts a rolling minute; a burst on top of a full refill once
+    sent 154 requests in 60 seconds against a 150 limit."""
+    store = DataStore(tmp_path / "s.sqlite")
+    clock = _Clock()
+    stamps = []
+    for _ in range(400):
+        acquire(store._conn(), "av", 150, clock=clock, sleep=clock.sleep)
+        stamps.append(clock.t)
+    worst = max(sum(1 for t in stamps if s <= t < s + 60) for s in stamps)
+    assert worst <= 150
 
 
 @pytest.mark.unit
@@ -248,7 +262,7 @@ def test_two_processes_share_one_bucket(tmp_path):
     DataStore(path)
     a, b = (sqlite3.connect(path, isolation_level=None, timeout=30) for _ in range(2))
     clock = _Clock()
-    for i in range(15):
+    for i in range(3):
         acquire(a if i % 2 else b, "av", 150, clock=clock, sleep=clock.sleep)
     assert acquire(a, "av", 150, clock=clock, sleep=clock.sleep) > 0, "the burst is shared, not per process"
 

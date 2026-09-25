@@ -12,9 +12,13 @@ import sqlite3
 import time
 from collections.abc import Callable
 
-# Burst allowance, as a fraction of a minute's budget. Small, so a burst from one
-# process cannot take the whole minute from another.
-BURST_FRACTION = 0.1
+# The vendor counts requests per rolling minute. A bucket of capacity C that
+# refills at R per minute admits up to C + R in any 60 seconds, so the refill is
+# the limit minus the burst: the first live harvest probe used a 15-token burst
+# on top of a full 150/min refill, sent 154 requests in its first minute, and
+# was told "rate limit exceeded". A burst of three is enough to overlap a few
+# requests without ever crossing the line.
+MAX_BURST = 3.0
 
 # Refill arithmetic in floats lands a hair under a whole token (0.99999...), and
 # the pause that would cover the gap is too small to move a clock: without a
@@ -29,8 +33,8 @@ def acquire(conn: sqlite3.Connection, name: str, per_minute: float, *,
     """Take one token, waiting if none is available. Returns seconds waited."""
     if per_minute <= 0:
         return 0.0
-    rate = per_minute / 60.0
-    capacity = max(1.0, per_minute * BURST_FRACTION)
+    capacity = max(1.0, min(MAX_BURST, per_minute / 10.0))
+    rate = max(per_minute - capacity, 1.0) / 60.0
     waited = 0.0
     while True:
         conn.execute("BEGIN IMMEDIATE")
