@@ -24,7 +24,10 @@ class Slot:
 
 
 def plan_night(config: dict, mandate: str, max_names: int = DEFAULT_MAX_NAMES,
-               backlog: int = DEFAULT_BACKLOG) -> list[Slot]:
+               backlog: int = DEFAULT_BACKLOG, fresh: str | None = None) -> list[Slot]:
+    """``fresh`` (a date): the backlog is only that date's screens -- for the
+    standard strategy, whose 5-day picks can be traded only the morning after
+    they are screened, so an older screen's names are not worth the night."""
     from tradingagents.screener import run as screen_run
 
     from .trials import load_trials
@@ -44,7 +47,8 @@ def plan_night(config: dict, mandate: str, max_names: int = DEFAULT_MAX_NAMES,
                 q.append((t.id, t.candidate, p))
         if q:
             queues.append(q)
-    backlog_plans = [p for p in screen_run.unfinished(config, mandate) if p.todo]
+    backlog_plans = [p for p in screen_run.unfinished(config, mandate) if p.todo
+                     and (fresh is None or p.manifest.as_of == fresh)]
 
     slots: list[Slot] = []
     left_in = {}  # id(plan) -> names not yet allocated

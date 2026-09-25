@@ -137,7 +137,8 @@ def parse(path: str | Path, scheduled: str | None = "02:00") -> NightlyRun:
         if mm := re.match(r"--- step \d: (screen|adjudicate)\b.*\[(\d{2}):(\d{2}):(\d{2})\] ---", line):
             h, mi, s = (int(mm.group(i)) for i in (2, 3, 4))
             at = run.started.replace(hour=h, minute=mi, second=s)
-            run.steps[mm.group(1)] = at + timedelta(days=1) if at < run.started else at
+            # The first of each: the standard strategy's later steps reuse the names.
+            run.steps.setdefault(mm.group(1), at + timedelta(days=1) if at < run.started else at)
         elif mm := re.match(r"mandate=(\S+) max_names=(\d+)", line):
             run.mandate, run.max_names = mm.group(1), int(mm.group(2))
         elif mm := re.search(r"\(run (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\)", line):

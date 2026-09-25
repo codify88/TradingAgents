@@ -26,6 +26,10 @@ BACKLOG="${NIGHTLY_BACKLOG:-2}"
 PICKS="${NIGHTLY_PICKS:-8}"
 CONTROLS="${NIGHTLY_CONTROLS:-4}"
 BUDGET="${NIGHTLY_BUDGET:-60}"
+# The standard (no-mandate, 5-day) strategy: its screen is free and always runs;
+# its agent decisions cost model calls, so they are off until a count is chosen.
+STANDARD_NAMES="${NIGHTLY_STANDARD_NAMES:-0}"
+STANDARD_CONTROLS="${NIGHTLY_STANDARD_CONTROLS:-3}"
 
 mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -39,6 +43,7 @@ exec > >(tee -a "$LOG") 2>&1
 
 echo "=== nightly run $STAMP ==="
 echo "mandate=$MANDATE max_names=$MAX_NAMES backlog=$BACKLOG picks=$PICKS controls=$CONTROLS budget=$BUDGET"
+echo "standard: names=$STANDARD_NAMES controls=$STANDARD_CONTROLS"
 echo
 
 if [ ! -x "$TRADINGAGENTS" ]; then
@@ -68,6 +73,30 @@ STATUS=$?
 echo
 echo "--- summary [$(date +%H:%M:%S)] ---"
 "$TRADINGAGENTS" screen-review --mandate "$MANDATE" < /dev/null || true
+
+echo
+# Reuses tonight's stored prices, so it costs almost no requests.
+echo "--- step 3: standard screen (no model calls) [$(date +%H:%M:%S)] ---"
+"$TRADINGAGENTS" screen --mandate none --controls "$STANDARD_CONTROLS" < /dev/null \
+    || echo "standard screen failed; no standard picks today."
+
+if [ "$STANDARD_NAMES" -gt 0 ]; then
+    echo
+    # Only today's screen: a 5-day pick can be traded only the morning after.
+    echo "--- step 4: adjudicate at most $STANDARD_NAMES standard names [$(date +%H:%M:%S)] ---"
+    "$TRADINGAGENTS" nightly-queue --mandate none --max-names "$STANDARD_NAMES" \
+        --backlog "$STANDARD_NAMES" --fresh < /dev/null || true
+fi
+
+# Paper book, once the Alpaca keys are in .env: yesterday's fills are final by
+# now, so reconcile first, then plan the open. Nothing is sent from here --
+# every plan waits for the operator's approval.
+if grep -q '^ALPACA_API_KEY=.' "$REPO/.env" 2>/dev/null; then
+    echo
+    echo "--- step 5: paper book: reconcile, then the order plan [$(date +%H:%M:%S)] ---"
+    "$TRADINGAGENTS" trade reconcile < /dev/null || true
+    "$TRADINGAGENTS" trade plan < /dev/null || true
+fi
 
 echo
 echo "--- data store ---"

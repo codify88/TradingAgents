@@ -1704,11 +1704,16 @@ def nightly_queue_command(
     backlog: int = typer.Option(2, "--backlog", help="Of those, how many go to the screen backlog."),
     analysts: str = typer.Option(None, "--analysts", help="Comma-separated analysts; omit for all."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the allocation and stop."),
+    fresh: bool = typer.Option(False, "--fresh",
+                               help="Backlog is only today's screens (the standard strategy's picks go stale)."),
 ):
     """Split tonight's budget between the screen backlog and active trials (decision 5)."""
     from tradingagents.evaluation.queue import plan_night
 
-    slots = plan_night(DEFAULT_CONFIG, mandate, max_names, backlog)
+    if mandate.lower() in ("none", "standard"):
+        mandate = ""
+    today = datetime.datetime.now().strftime("%Y-%m-%d") if fresh else None
+    slots = plan_night(DEFAULT_CONFIG, mandate, max_names, backlog, fresh=today)
     if not slots:
         console.print("[green]Nothing to run: every screen and trial is decided.[/green]")
         return

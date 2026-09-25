@@ -143,6 +143,14 @@ def test_with_no_trials_every_slot_goes_to_the_backlog(config):
 
 
 @pytest.mark.unit
+def test_fresh_limits_the_backlog_to_that_days_screens(config):
+    _screen(config, 1, "2021-03-01")
+    today = _screen(config, 2, "2021-03-02")
+    slots = queue.plan_night(config, "equity_value", max_names=5, backlog=5, fresh="2021-03-02")
+    assert [s.plan.manifest.run_id for s in slots] == [today.run_id]
+
+
+@pytest.mark.unit
 def test_trials_take_three_and_the_backlog_two(config):
     a = _screen(config, 1, "2021-03-01")
     b = _screen(config, 2, "2022-03-01")

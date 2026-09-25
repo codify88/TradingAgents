@@ -218,11 +218,25 @@ def harvest_status() -> str:
     return status(_config())
 
 
+def _pending_plan() -> str:
+    """The order plan awaiting approval, if it has orders; never an error in the report."""
+    try:
+        from tradingagents.trading import plan as pl
+
+        p = pl.latest_pending(_config())
+    except Exception:  # a broken plan file must not stop the morning report
+        return ""
+    return pl.render(p) if p and p.orders else ""
+
+
 def morning_report() -> str:
     """The 08:00 message: last night's run, what it decided, reviews due this
     week, and the harvest's progress. Deterministic: no model writes it, so it
     cannot misreport."""
     parts = [nightly_status(), recent_decisions(24), pending_reviews(7), harvest_status()]
+    plan = _pending_plan()
+    if plan:
+        parts.insert(0, plan)  # first: it needs an answer before the 09:28 cutoff
     text = "\n\n".join(parts)
     # Telegram's limit is 4,096 characters per message.
     return text if len(text) <= 3900 else text[:3900] + "\n[... cut; ask for details]"
