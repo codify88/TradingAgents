@@ -158,7 +158,8 @@ def _chain(tmp_path, nightly_exit, harvest_exit=None):
         s = repo / "scripts" / f"{name}.sh"
         s.write_text(f"#!/bin/bash\necho {name} >> {trace}\nexit {code}\n")
         s.chmod(0o755)
-    env = {**os.environ, "HOME": str(tmp_path), "TA_CAFFEINATED": "1"}
+    # Distill day 0 never comes, so these tests do not depend on the weekday; a test sets it to exercise it.
+    env = {"PLATFORM_DISTILL_DAY": "0", **os.environ, "HOME": str(tmp_path), "TA_CAFFEINATED": "1"}
     out = subprocess.run([str(runner)], env=env, capture_output=True, text=True, timeout=30)
     log = next((tmp_path / ".tradingagents" / "logs" / "platform").glob("*.log")).read_text()
     return out.returncode, trace.read_text().split(), log
@@ -170,6 +171,21 @@ def test_the_chain_runs_the_harvest_after_a_failed_nightly_and_returns_the_failu
     assert ran == ["nightly", "harvest"]
     assert code == 2
     assert "end nightly exit=2" in log and "end harvest exit=0" in log
+
+
+@pytest.mark.unit
+def test_the_chain_distills_on_its_distill_day(tmp_path, monkeypatch):
+    import datetime as _dt
+
+    fake = tmp_path / "ta"
+    fake.write_text(f"#!/bin/bash\necho \"ta $*\" >> {tmp_path / 'trace'}\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("TRADINGAGENTS", str(fake))
+    monkeypatch.setenv("PLATFORM_DISTILL_DAY", str(_dt.date.today().isoweekday()))
+    monkeypatch.setenv("PLATFORM_DISTILL_MANDATES", "equity_value")
+    code, ran, log = _chain(tmp_path, nightly_exit=0, harvest_exit=0)
+    assert code == 0 and "ta learn distill --mandate equity_value" in (tmp_path / "trace").read_text()
+    assert "end distill equity_value exit=0" in log
 
 
 @pytest.mark.unit

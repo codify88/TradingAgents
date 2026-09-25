@@ -1,6 +1,7 @@
 #!/bin/bash
-# The nightly chain, for launchd: the nightly run, then the harvest, in one job
-# kept awake by caffeinate so the Mac cannot drop back to sleep between steps.
+# The nightly chain, for launchd: the nightly run, then the harvest, then (on
+# Sundays) the playbook distill, in one job kept awake by caffeinate so the Mac
+# cannot drop back to sleep between steps.
 #
 # Each step logs to its own file (nightly.sh keeps its own log). A failed step
 # does not skip the next -- the harvest makes no model calls and is worth
@@ -39,6 +40,15 @@ if [ -x "$REPO/scripts/harvest.sh" ]; then
     step harvest "$REPO/scripts/harvest.sh"
 else
     echo "$(date +%H:%M:%S) skip harvest (scripts/harvest.sh not installed yet)" >> "$LOG"
+fi
+
+# Sundays: distill each mandate's playbook from the week's settled outcomes
+# (one deep-model call per mandate; nothing reaches an agent until the
+# evaluation harness has tested it). PLATFORM_DISTILL_DAY overrides the day for tests.
+if [ "$(date +%u)" = "${PLATFORM_DISTILL_DAY:-7}" ]; then
+    for mandate in ${PLATFORM_DISTILL_MANDATES:-equity_value equity_momentum equity_momentum_leaps}; do
+        step "distill $mandate" "${TRADINGAGENTS:-$HOME/.local/bin/tradingagents}" learn distill --mandate "$mandate"
+    done
 fi
 
 find "$LOG_DIR" -name '*.log' -mtime +30 -delete 2>/dev/null
