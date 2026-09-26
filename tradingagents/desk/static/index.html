@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="desk-token" content="{{DESK_TOKEN}}">
+<title>Desk · trade-agents</title>
+<link rel="stylesheet" href="/static/desk.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Desk</div>
+  <nav role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" data-tab="lab" aria-selected="false">Lab</button>
+    <button role="tab" data-tab="trading" aria-selected="false">Trading</button>
+    <button role="tab" data-tab="decisions" aria-selected="false">Decisions</button>
+  </nav>
+  <div class="top-right">
+    <span id="updated" class="muted"></span>
+    <button id="refresh" class="ghost" title="Refresh (r)">Refresh</button>
+  </div>
+</header>
+
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<main>
+  <section id="tab-overview" class="tab" aria-label="Overview"></section>
+  <section id="tab-lab" class="tab" aria-label="Lab" hidden></section>
+  <section id="tab-trading" class="tab" aria-label="Trading" hidden></section>
+  <section id="tab-decisions" class="tab" aria-label="Decisions" hidden>
+    <div class="card">
+      <h2>Decisions</h2>
+      <form id="decisions-form" class="row">
+        <label>Ticker <input name="ticker" size="8" autocomplete="off"></label>
+        <label>Mandate <input name="mandate" size="16" placeholder="any" autocomplete="off"></label>
+        <label>Since <input name="since" type="date"></label>
+        <label>Limit <input name="limit" type="number" value="50" min="1" max="500"></label>
+        <button type="submit">Search</button>
+      </form>
+      <pre id="decisions-out" class="text"></pre>
+    </div>
+    <div class="card">
+      <h2>A decision's full report</h2>
+      <form id="report-form" class="row">
+        <label>Ticker <input name="ticker" size="8" required autocomplete="off"></label>
+        <label>Day <input name="day" type="date" required></label>
+        <button type="submit">Open</button>
+      </form>
+      <pre id="report-out" class="text"></pre>
+    </div>
+  </section>
+</main>
+
+<dialog id="adopt-dialog">
+  <form method="dialog" id="adopt-form">
+    <h2>Adopt <span id="adopt-variant" class="mono"></span></h2>
+    <p id="adopt-strategy" class="muted"></p>
+    <div id="adopt-figures"></div>
+    <div id="adopt-verdict"></div>
+    <label class="block">Why (kept with the adoption)
+      <textarea name="reason" rows="3" required></textarea>
+    </label>
+    <p id="adopt-live" class="muted"></p>
+    <menu>
+      <button value="cancel" class="ghost" formnovalidate>Cancel</button>
+      <button value="confirm" class="primary">Adopt</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="confirm-dialog">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <div id="confirm-body"></div>
+    <label class="block" id="confirm-reason-wrap" hidden>Reason
+      <input name="reason" id="confirm-reason">
+    </label>
+    <menu>
+      <button value="cancel" class="ghost" formnovalidate>Cancel</button>
+      <button value="confirm" id="confirm-ok" class="primary">Confirm</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="/static/desk.js"></script>
+</body>
+</html>

@@ -44,6 +44,11 @@ bedrock = [
 mcp = [
     "mcp>=2.2",
 ]
+# Desk, the operator's local web UI (tradingagents desk).
+desk = [
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"
@@ -53,6 +58,7 @@ include = ["tradingagents*", "cli*"]
 
 [tool.setuptools.package-data]
 cli = ["static/*"]
+"tradingagents.desk" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

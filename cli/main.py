@@ -1891,6 +1891,7 @@ def lab_run(
     trials = report.record_trials(DEFAULT_CONFIG, spec, results)
     v = report.verdict(spec, results, trials)
     report.save_suggestion(DEFAULT_CONFIG, v)
+    report.save_results(DEFAULT_CONFIG, strategy, spec, results, v, split or spec.split)
     text = report.render(spec, results, v, split or spec.split)
     out = panel.lab_dir(DEFAULT_CONFIG) / f"{strategy}-report.md"
     out.write_text(text)
@@ -1900,19 +1901,21 @@ def lab_run(
 
 @lab_app.command(name="adopt")
 def lab_adopt(
-    strategy: str = typer.Argument(..., help="standard | momentum"),
+    strategy: str = typer.Argument(..., help="standard | momentum | value"),
     variant: str = typer.Argument(..., help="A variant id from `lab run`, e.g. reversal_5d/p8/dv25m."),
     reason: str = typer.Option("", "--reason", help="Why, for the record."),
 ):
     """Make a lab variant the live screen's ordering (recorded, versioned, reversible)."""
-    from tradingagents.lab.adopted import adopt
+    from tradingagents.lab.adopted import READ_LIVE, adopt
 
     try:
         row = adopt(DEFAULT_CONFIG, strategy, variant, reason)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from None
-    console.print(f"Adopted {row['variant']} for {strategy} at {row['at']}; the next screen uses it.")
+    console.print(f"Adopted {row['variant']} for {strategy} at {row['at']}; "
+                  + ("the next screen uses it." if strategy in READ_LIVE else
+                     "recorded, but this strategy's live screen does not read adoptions yet."))
 
 
 @lab_app.command(name="show")
@@ -1934,6 +1937,20 @@ def suggest_command():
     from tradingagents.lab.report import render_suggestions
 
     console.print(render_suggestions(DEFAULT_CONFIG))
+
+
+@app.command(name="desk")
+def desk_command(
+    port: int = typer.Option(8765, "--port", help="Local port (the server listens on 127.0.0.1 only)."),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open Desk in the browser."),
+):
+    """Desk: the operator's local web UI -- lab adoption, paper trading, the night's results."""
+    try:
+        from tradingagents.desk.app import serve
+    except ImportError as exc:
+        console.print(f"[red]Desk needs its extra: pip install -e '.[desk]' ({exc}).[/red]")
+        raise typer.Exit(code=1) from None
+    serve(DEFAULT_CONFIG, port=port, open_browser=open_browser)
 
 
 trade_app = typer.Typer(help="Paper execution for the standard strategy: plans, approval, halt, reconcile.")

@@ -26,10 +26,18 @@ unless `trading_live` is set, which nothing sets.
 | Nightly, after the value run | `screen --mandate none` (free); with `NIGHTLY_STANDARD_NAMES` > 0, the agents decide today's picks; with Alpaca keys in `.env`, `trade reconcile` then `trade plan`. Nothing is sent. |
 | 08:00 | The morning report leads with the pending plan, if it has orders. |
 | Before 09:28 New York | Approve: `tradingagents trade submit <plan>` at the terminal, or ask Hermes to submit it (it asks for approval first). An unapproved plan expires; nothing is sent by default. |
-| Any time | `tradingagents trade halt` (or Hermes: halt trading) refuses every new order and cancels open ones; positions are kept. `trade resume` lifts it -- at the terminal only. |
+| Any time | `tradingagents trade halt` (or Hermes: halt trading) refuses every new order and cancels open ones; positions are kept. `trade resume` lifts it -- at the terminal or in Desk, never from Hermes. |
 | After a mismatch | Reconciliation blocks new orders until `tradingagents trade ack`, after checking the broker. |
 
 `tradingagents trade status` shows live cohorts, the switches and the account.
+
+## Desk (the local web UI)
+
+`tradingagents desk` opens `http://127.0.0.1:8765/`: the morning report, the
+lab (adopt a variant, with its evidence recorded), the paper book (approve and
+send a plan, halt, resume, acknowledge, reconcile) and past decisions. It
+listens on this Mac only and needs the `desk` extra (`pip install -e '.[desk]'`;
+already present with `mcp`). Design: `docs/design/desk.md`.
 
 ## Secrets
 

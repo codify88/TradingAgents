@@ -95,6 +95,33 @@ def save_suggestion(config: dict, v: Verdict) -> None:
         fh.write(json.dumps({"at": datetime.now(UTC).isoformat(timespec="seconds"), **asdict(v)}) + "\n")
 
 
+def _stats(s) -> dict:
+    return {k: (_num(v) if isinstance(v, float) else v) for k, v in asdict(s).items()}
+
+
+def save_results(config: dict, key: str, strategy: Strategy, results: list[Result], v: Verdict,
+                 split: str) -> None:
+    """Every variant's figures and the verdict, as data: what the report shows,
+    for Desk to rank and to record as the evidence behind an adoption."""
+    data = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "strategy": key,
+            "name": strategy.name, "horizon": strategy.horizon, "every": strategy.every,
+            "style": strategy.style, "split": split, "note": strategy.note, "verdict": asdict(v),
+            "variants": [{"variant": r.variant.id, "signal": r.variant.signal,
+                          "null": r.variant.signal in NULL_SIGNALS,
+                          "tune": _stats(r.tune), "test": _stats(r.test),
+                          "reads": {str(h): {"tune": _stats(a), "test": _stats(b)}
+                                    for h, (a, b) in r.reads.items()}}
+                         for r in sorted(results, key=lambda r: -_key(r.tune.t))]}
+    (lab_dir(config) / f"{key}-results.json").write_text(json.dumps(data, indent=1))
+
+
+def load_results(config: dict, key: str) -> dict | None:
+    try:
+        return json.loads((lab_dir(config) / f"{key}-results.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def _pct(x: float) -> str:
     return "—" if x is None or math.isnan(x) else f"{x:+.2%}"
 
