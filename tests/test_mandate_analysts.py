@@ -413,3 +413,22 @@ class TestPreambleTracksUpstream:
 
         assert "FINAL TRANSACTION PROPOSAL" not in _PREAMBLE
         assert "BUY/HOLD/SELL" not in _PREAMBLE
+
+
+def test_a_run_without_a_mandate_is_told_its_holding_period():
+    """Upstream grades a no-mandate decision over holding_period_days but never
+    said so; a pilot's portfolio manager then stated 2 weeks to 5 years."""
+    from tradingagents.agents.utils.agent_utils import mandate_section
+    from tradingagents.mandates.base import context_for
+
+    ctx = context_for(None, {"holding_period_days": 5})
+    assert "HOLDING PERIOD: 5 trading days." in ctx and "relative to SPY" in ctx
+    assert "Give 5 trading days as the time horizon." in ctx
+    assert "trading day." in context_for(None, {"holding_period_days": 1})
+    assert "relative to QQQ" in context_for(None, {"holding_period_days": 5, "benchmark_ticker": "QQQ"})
+    assert context_for(None, {"holding_period_framing": False}) == ""        # upstream's prompts
+    assert context_for(EQUITY_VALUE, {}) == render_mandate_context(EQUITY_VALUE)  # a mandate states its own
+    state = {"mandate": "", "mandate_context": ctx, "mandate_reports": {}}
+    assert mandate_section(state, "portfolio_manager") == f"{ctx}\n\n"      # reaches the downstream agents
+    # It takes no side.
+    assert not any(w in ctx.lower() for w in ("buy", "sell", "bullish", "bearish", "overweight", "underweight"))

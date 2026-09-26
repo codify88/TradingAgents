@@ -169,6 +169,40 @@ class Mandate:
         return guidance
 
 
+def render_holding_context(holding_days: int, benchmark: str = "SPY") -> str:
+    """The prompt block for a decision made under no mandate: the holding period
+    it is traded and graded on.
+
+    Upstream grades an un-mandated decision over ``holding_period_days`` (5)
+    but never tells the agents, and its portfolio-manager schema suggests
+    "3-6 months": a 2026-09-26 pilot's portfolio manager stated horizons from
+    two weeks to five years for decisions scored over one. Stated plainly, the
+    horizon is the same for the research as for the grading. It says nothing
+    about direction.
+    """
+    days = f"{holding_days} trading day{'s' if holding_days != 1 else ''}"
+    return "\n".join([
+        f"HOLDING PERIOD: {days}.",
+        f"A position opened on this decision is held for {days} and then closed; there is no "
+        f"longer holding period. Judge it on what the stock is likely to do over those {days} "
+        f"relative to {benchmark}, not on its value over months or years: a long-term view "
+        f"matters here only through what it does to the price within that window.",
+        f"Give {days} as the time horizon.",
+    ])
+
+
+def context_for(mandate: Mandate | None, config: dict) -> str:
+    """The block every downstream agent reads: the mandate's, or -- with no
+    mandate -- the holding period (unless ``holding_period_framing`` is off,
+    which reproduces upstream's prompts exactly)."""
+    if mandate is not None:
+        return render_mandate_context(mandate)
+    if not config.get("holding_period_framing", True):
+        return ""
+    return render_holding_context(int(config.get("holding_period_days", 5)),
+                                  config.get("benchmark_ticker") or "SPY")
+
+
 def render_mandate_context(mandate: Mandate | None) -> str:
     """Render the prompt block every agent interpolates.
 

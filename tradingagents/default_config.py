@@ -175,6 +175,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Trading days after the analysis date over which a decision's outcome is
     # measured, for reflection and for the backtest figures.
     "holding_period_days": 5,
+    # Fork: tell the agents that holding period when no mandate is set (a
+    # mandate states its own horizon). False reproduces upstream's prompts.
+    "holding_period_framing": True,
     "benchmark_ticker": None,
     "benchmark_map": {
         ".NS":  "^NSEI",       # NSE India (Nifty 50)

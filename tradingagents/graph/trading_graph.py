@@ -34,7 +34,8 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import get_current_date, safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
-from tradingagents.mandates import get_mandate, render_mandate_context
+from tradingagents.mandates import get_mandate
+from tradingagents.mandates.base import context_for
 from tradingagents.reporting import write_report_tree
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
@@ -140,7 +141,9 @@ class TradingAgentsGraph:
             mandate if mandate is not None else self.config.get("mandate", "")
         ) or ""
         self.mandate = get_mandate(self.mandate_name)
-        self.mandate_context = render_mandate_context(self.mandate)
+        # With no mandate, the holding period the decision is traded and graded
+        # on (upstream grades over it but never tells the agents).
+        self.mandate_context = context_for(self.mandate, self.config)
 
         # Update the interface's config
         set_config(self.config)
