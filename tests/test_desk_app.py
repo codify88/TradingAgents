@@ -189,3 +189,11 @@ def test_the_app_is_served_for_client_routes_and_the_v1_page_moves_to_classic(co
     assert "DESK_TOKEN" not in c.get("/classic").text and "desk.js" in c.get("/classic").text
     assert c.get("/api/v1/nope").status_code == 404
     assert c.get("/../../etc/passwd").text == "<div id=root></div>"
+
+
+@pytest.mark.unit
+def test_desk_hosts_may_be_pasted_as_urls(monkeypatch):
+    from tradingagents.desk.app import configured_hosts
+
+    monkeypatch.setenv("TRADINGAGENTS_DESK_HOSTS", " https://Mac.tail1234.ts.net/ , other.ts.net:443")
+    assert configured_hosts({}) == ("127.0.0.1", "localhost", "mac.tail1234.ts.net", "other.ts.net")

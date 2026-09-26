@@ -43,9 +43,11 @@ TRADE_ACTIONS = ("submit", "halt", "resume", "ack", "reconcile")
 
 
 def configured_hosts(config: dict) -> tuple[str, ...]:
+    """Loopback plus the names in ``desk_hosts`` / ``TRADINGAGENTS_DESK_HOSTS``,
+    each given as a bare name or pasted as a URL (``https://mac.tailnet.ts.net/``)."""
     extra = config.get("desk_hosts") or os.environ.get("TRADINGAGENTS_DESK_HOSTS", "")
-    names = [h.strip().lower() for h in (extra.split(",") if isinstance(extra, str) else extra) if h.strip()]
-    return tuple(dict.fromkeys([*LOCAL_HOSTS, *names]))
+    names = [_host(h.strip()) for h in (extra.split(",") if isinstance(extra, str) else extra) if h.strip()]
+    return tuple(dict.fromkeys([*LOCAL_HOSTS, *(n for n in names if n)]))
 
 
 def _host(value: str | None) -> str:
