@@ -2026,6 +2026,68 @@ def desk_code():
     console.print(f"Enrolment code: [bold]{code[:4]}-{code[4:]}[/bold]  (one use, 15 minutes)")
 
 
+agents_app = typer.Typer(help="The agent lab: what each agent reads and calls, variants, and tests on fixed cases.")
+app.add_typer(agents_app, name="agents")
+
+
+@agents_app.command(name="catalog")
+def agents_catalog():
+    """Every agent in graph order -- model, what it reads, its tools and their vendors -- and unused tools."""
+    from tradingagents.agentlab.catalog import catalog
+
+    c = catalog(DEFAULT_CONFIG)
+    for a in c["agents"]:
+        console.print(f"[bold]{a['node']}[/bold] ({a['tier']}: {a['model']}): {a['reads']}"
+                      + (f"\n   tools: {', '.join(a['tools'])}" if a["tools"] else ""))
+    console.print(f"\nDefined but no agent calls them: {', '.join(c['unused_tools']) or 'none'}")
+    console.print("Vendors: " + ", ".join(f"{k}={v}" for k, v in c["vendors"].items()))
+
+
+@agents_app.command(name="suite-build")
+def agents_suite_build(
+    name: str = typer.Argument(..., help="Suite name (lowercase, digits, dashes)."),
+    start: str = typer.Option(..., "--start"), end: str = typer.Option(..., "--end"),
+    count: int = typer.Option(40, "--count", help="Weekly dates, spread evenly."),
+    picks: int = typer.Option(8, "--picks"), controls: int = typer.Option(4, "--controls"),
+):
+    """A suite of standard screens on past Fridays (price requests only, no model calls)."""
+    from tradingagents.agentlab import suites
+
+    s = suites.build(DEFAULT_CONFIG, name, suites.weekly_dates(start, end, count), picks, controls)
+    console.print(f"Suite {s.name}: {len(s.dates)} dates, {s.cases} cases ({s.dates[0]} .. {s.dates[-1]}).")
+
+
+@agents_app.command(name="execute")
+def agents_execute(run_id: str = typer.Argument(..., help="A run started from Desk or `agents start`.")):
+    """Run (or resume) a variant on its suite. Model calls are billed to the API key."""
+    from tradingagents.agentlab import runs
+
+    meta = runs.execute(DEFAULT_CONFIG, run_id)
+    m = runs.metrics(DEFAULT_CONFIG, run_id)
+    console.print(f"Run {run_id}: {m['decided']} decided, {meta.get('failures') and len(meta['failures']) or 0} "
+                  f"failed; ratings {m['ratings']}; cost ${m['cost_low'] or 0:.2f}.")
+
+
+@agents_app.command(name="start")
+def agents_start(
+    variant: str = typer.Argument(...), suite: str = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes", help="Skip the cost confirmation."),
+):
+    """Estimate, confirm, then run a variant on a suite in the foreground."""
+    from tradingagents.agentlab import runs, variants
+
+    v = variants.load(DEFAULT_CONFIG, variant)
+    est = runs.estimate(DEFAULT_CONFIG, v, suite)
+    console.print(f"{est['cases']} decisions with {', '.join(est['models'])}: about "
+                  f"${est['cost_low']:.0f}-{est['cost_high']:.0f}, ~{est['minutes']} min.")
+    if est["cutoff_warning"]:
+        console.print(f"[yellow]{est['cutoff_warning']}[/yellow]")
+    if not yes and not typer.confirm("Spend that on API credits?"):
+        raise typer.Exit(code=1)
+    rid = runs.start_record(DEFAULT_CONFIG, v, suite)
+    agents_execute(rid)
+
+
 trade_app = typer.Typer(help="Paper execution for the standard strategy: plans, approval, halt, reconcile.")
 app.add_typer(trade_app, name="trade")
 

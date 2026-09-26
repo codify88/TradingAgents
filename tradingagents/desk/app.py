@@ -178,6 +178,10 @@ def create_app(config: dict, token: str | None = None, broker_factory=None,
             return refused(400, str(exc))
         return {"result": text}
 
+    from .agentlab_api import register as register_agent_lab
+
+    register_agent_lab(app, config, authorised, refused, body_of)
+
     # --- the v1 page's API (/api), unchanged but for the money actions ------------
 
     @app.get("/api/overview")
