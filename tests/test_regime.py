@@ -133,7 +133,11 @@ def test_market_state_variants_are_named_not_a_grid_and_cannot_be_adopted(tmp_pa
     assert len(std) == 34 and sum("/if_" in v for v in std) == 2
     assert "liquidity/p8/dv5m/if_stressed:reversal_5d" in std
     assert "excess_12m/p8/dv5m/top60/if_long_down:cash" in [v.id for v in rp.variants(rp.STRATEGIES["momentum"])]
-    assert len(rp.variants(rp.STRATEGIES["value"])) == 48
+    # Value: no market-state variants; its grid of 48 plus four named quality rule sets.
+    val = [v.id for v in rp.variants(rp.STRATEGIES["value"])]
+    assert len(val) == 52 and sum("/q_" in v for v in val) == 4 and not any("/if_" in v for v in val)
+    with pytest.raises(ValueError, match="rule-set variant"):
+        adopted.adopt({"data_cache_dir": str(tmp_path)}, "value", "fcf_pct/p8/dv5m/top60/q_rel")
     with pytest.raises(ValueError, match="market's state"):
         adopted.adopt({"data_cache_dir": str(tmp_path)}, "standard", "liquidity/p8/dv5m/if_stressed:reversal_5d")
 
