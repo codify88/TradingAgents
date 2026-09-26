@@ -232,3 +232,35 @@ def test_facts_are_filled_once_by_symbol_and_vendor_errors_retried(tmp_path):
     assert calls == [("B", "2015-01-02")]  # only the vendor error is asked again
     c = fu.coverage(fu.load_facts(config), pairs)
     assert c["judged"] == 3 and c["vendor_errors"] == 0
+
+
+def test_the_live_rule_set_reproduces_the_live_quality_screens():
+    """Recomputed from its metrics, "live" must trip exactly what quality_screens trips,
+    so any difference a rule set makes is the rule, not a re-implementation."""
+    from tradingagents.lab.quality_rules import RULES, metrics_of
+    from tradingagents.mandates.tools.quality import quality_screens
+
+    rng = np.random.default_rng(3)
+    idx = pd.date_range("2010-12-31", periods=12, freq="YE")
+    for _ in range(200):
+        m = pd.DataFrame({
+            "roic": rng.normal(0.14, 0.08, 12).cumsum() / np.arange(1, 13) + rng.normal(0, 0.05),
+            "net_debt_to_ebitda": rng.normal(2, 2, 12), "interest_coverage": rng.normal(8, 6, 12),
+            "net_debt": rng.normal(0, 5e9, 12), "ocf_to_net_income": rng.normal(1.1, 0.4, 12),
+            "receivables": np.abs(rng.normal(1e9, 3e8, 12)), "revenue": np.abs(rng.normal(1e10, 2e9, 12)),
+        }, index=idx)
+        live = sorted(s.name for s in quality_screens(m) if s.status == "TRIPPED")
+        assert sorted(RULES["live"](metrics_of(m))) == live
+
+
+def test_relative_rules_forgive_a_decline_from_a_high_level_only():
+    from tradingagents.lab.quality_rules import POOR, RULES
+
+    base = {"roic_median": 0.30, "roic_slope": -0.025, "roic_latest": 0.27, "leverage": 1.0,
+            "coverage": 20.0, "net_debt": 1e9, "conversion": 1.5, "receivables_gap": 0.06}
+    assert POOR in RULES["live"](base) and POOR not in RULES["rel_roic"](base)   # Apple 2019
+    assert POOR in RULES["rel_roic"]({**base, "roic_latest": 0.11})                 # heading for the floor
+    msft = {**base, "roic_slope": 0.0}
+    assert RULES["live"](msft) and not RULES["rel_acct"](msft)                     # receivables alone, cash 1.5x
+    assert RULES["rel_acct"]({**msft, "conversion": 0.9})                           # and weak cash: still a flag
+    assert rp.Variant("fcf_pct", 8, 5e6, 60, "rel").id == "fcf_pct/p8/dv5m/top60/q_rel"

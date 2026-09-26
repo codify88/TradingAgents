@@ -72,6 +72,9 @@ def adopt(config: dict, strategy: str, variant_id: str, reason: str = "",
     if v.when:
         raise ValueError("the live screens do not read the market's state yet, so a market-state "
                          "variant cannot be adopted")
+    if isinstance(v.quality, str):
+        raise ValueError("the live value screen applies only its own quality rules so far, so a "
+                         "rule-set variant cannot be adopted yet")
     if strategy in BUDGETED and not v.pool:
         raise ValueError(f"the live {strategy} screen ranks within a liquidity budget; "
                          f"adopt a /topN variant, not {v.id}")

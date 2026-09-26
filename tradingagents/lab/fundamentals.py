@@ -47,6 +47,7 @@ class Facts:
     years: int = 0                 # fiscal years of history the percentiles use
     error: str = ""                # why the name could not be judged (excluded, as live)
     vendor: bool = False           # the error was the vendor, not the company
+    metrics: dict[str, float] = field(default_factory=dict)  # what the quality rules read (quality_rules.py)
 
 
 def _pct(current: float, history) -> float:
@@ -72,6 +73,9 @@ def compute(symbol: str, as_of: str) -> Facts:
     try:
         metrics = annual_metrics(fin)
         tripped = [s.name for s in quality_screens(metrics) if s.status == "TRIPPED"]
+        from .quality_rules import metrics_of
+
+        rule_inputs = metrics_of(metrics)
         closes = _long_prices(fin)
         if closes.empty:
             return Facts(tripped=tripped, error="no price history", vendor=True)
@@ -90,7 +94,7 @@ def compute(symbol: str, as_of: str) -> Facts:
         if "ev_to_ebit" in history and current.enterprise_value > 0:
             values["ebit_pct"] = _pct(current.ttm_operating_income / current.enterprise_value,
                                       1 / history["ev_to_ebit"])
-    return Facts(tripped=tripped, values=values, years=len(history))
+    return Facts(tripped=tripped, values=values, years=len(history), metrics=rule_inputs)
 
 
 # --- the cache ----------------------------------------------------------------------
@@ -139,7 +143,7 @@ class FactsReport:
 
 def fill(config: dict, pairs: list[tuple[str, str]], compute_one: Callable[[str, str], Facts] = compute,
          deadline: datetime | None = None, retry_vendor: bool = True,
-         progress: Callable[[int, int], None] | None = None) -> FactsReport:
+         progress: Callable[[int, int], None] | None = None, refresh: bool = False) -> FactsReport:
     """Compute what the cache lacks (and, by default, retry earlier vendor errors).
     Runs inside ``prefer_stored``: statements and prices already stored are not
     asked for again, whatever their age."""
@@ -147,8 +151,11 @@ def fill(config: dict, pairs: list[tuple[str, str]], compute_one: Callable[[str,
 
     facts = load_facts(config)
     # By symbol, so one company's statements and prices are parsed while hot.
+    # ``refresh``: recompute judged facts cached before they carried their
+    # metrics, so the quality rule sets can be applied to every date.
     todo = sorted(p for p in dict.fromkeys(pairs)
-                  if p not in facts or (retry_vendor and facts[p].vendor))
+                  if p not in facts or (retry_vendor and facts[p].vendor)
+                  or (refresh and not facts[p].error and not getattr(facts[p], "metrics", None)))
     report = FactsReport(needed=len(todo))
     with prefer_stored():
         for n, (symbol, day) in enumerate(todo, 1):

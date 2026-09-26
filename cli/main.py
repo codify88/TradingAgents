@@ -1844,6 +1844,8 @@ def lab_facts(
     strategy: str = typer.Option("value", "--strategy", help="A fundamentals strategy: value."),
     start: str = typer.Option("2012-01-01", "--start", help="First schedule date."),
     hours: float = typer.Option(None, "--hours", help="Stop after this long; run again to continue."),
+    refresh: bool = typer.Option(False, "--refresh",
+                                 help="Recompute facts cached before they kept the quality metrics."),
 ):
     """Point-in-time statements, quality screens and cheapness for every name a value replay reads."""
     from tradingagents.lab import fundamentals as fu, panel, replay
@@ -1858,7 +1860,7 @@ def lab_facts(
     pairs = fu.needed(ctx, dates, max(x or 0 for x in spec.pools), min(spec.min_dollar_volume),
                       horizon=min((spec.horizon, *spec.read_horizons)))
     deadline = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=hours)) if hours else None
-    r = fu.fill(DEFAULT_CONFIG, pairs, deadline=deadline,
+    r = fu.fill(DEFAULT_CONFIG, pairs, deadline=deadline, refresh=refresh,
                 progress=lambda n, t: console.print(f"[dim]{n:,} / {t:,}[/dim]"))
     c = fu.coverage(fu.load_facts(DEFAULT_CONFIG), pairs)
     console.print(f"Computed {r.computed:,} of {r.needed:,} due ({r.stopped}); {r.vendor_errors:,} vendor errors. "

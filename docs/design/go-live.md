@@ -94,6 +94,28 @@ live screen, which would cost nothing and make no decisions.
 **Cash in downtrends costs momentum.** The rebounds it misses outweigh the
 falls it avoids.
 
+## Value's quality rules, relative versions (lab, 2026-09-26)
+
+Three rule sets named before they ran (`lab/quality_rules.py`), each with the
+live ordering and budget; value's trial count is now 52. The live rules,
+recomputed from the stored metrics, match the stored exclusions on 100% of
+19,151 name-months, so the differences are the rules.
+
+| Rule set | Excluded | Apple | Microsoft | 1-yr read to 2019 | 1-yr read 2020 on | Net vs S&P, 1 yr, 2020 on |
+|---|---|---|---|---|---|---|
+| live | 73% | 65% | 70% | +1.9% (t 0.8) | +1.7% (t 0.8) | +4.5% |
+| rel_roic | 67% | 36% | 22% | +2.6% | +1.5% | +5.6% |
+| rel_acct | 64% | 51% | 70% | +2.1% | +4.2% | +6.5% |
+| rel (both) | 55% | 0% | 15% | +3.0% (t 1.4) | +3.4% (t 1.2) | +6.4% |
+| none | 0% | 0% | 0% | +2.3% | +9.5% | +12.1% |
+
+`rel` keeps the thesis -- it still excludes returns heading for the floor and
+weak cash conversion -- and is better than the live rules on every read, but
+no read is significant, and at the 3-year hold the lab refuses a verdict. That
+dropping the rules entirely does best says the live rules mostly excluded the
+decade's winners. Adopting `rel` is a mandate decision; it needs the live
+screen to apply a rule set first.
+
 ## Two things to hold onto
 
 1. **Backtests of LLM judgement flatter it.** The models have read about the

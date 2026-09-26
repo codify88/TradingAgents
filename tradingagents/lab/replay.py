@@ -90,6 +90,10 @@ STRATEGIES = {
         "equity_value", 756, "IWD", "month",
         ("fcf_pct", "fcf_yield", "ey_pct", "ebit_pct", "liquidity", "random"),
         min_dollar_volume=(5e6,), pools=(60, 120), fundamentals=True, qualities=(True, False),
+        # The quality rule sets, named 2026-09-26 before they were run (lab/quality_rules.py):
+        # the live ordering and budget, with each set; and the relative set at 20 of 120.
+        extras=(("fcf_pct", 8, 5e6, 60, "rel_roic"), ("fcf_pct", 8, 5e6, 60, "rel_acct"),
+                ("fcf_pct", 8, 5e6, 60, "rel"), ("fcf_pct", 20, 5e6, 120, "rel")),
         split="2018-01-01", read_horizons=(252,),
         note="The live value screen on point-in-time statements: the 60 (or 120) most liquid names, "
              "the quality exclusions (or none: /noq), one cheapness ordering. Statements are restated "
@@ -104,7 +108,9 @@ class Variant:
     picks: int
     min_dollar_volume: float
     pool: int | None = None
-    quality: bool = True
+    # True: the live quality exclusions; False: none; a name: a rule set from
+    # lab/quality_rules.py (value only).
+    quality: bool | str = True
     # "<condition>:<signal or cash>": while the market-state condition holds on the
     # date, rank by that signal instead (or hold cash). See CONDITIONS.
     when: str | None = None
@@ -112,7 +118,8 @@ class Variant:
     @property
     def id(self) -> str:
         base = f"{self.signal}/p{self.picks}/dv{self.min_dollar_volume / 1e6:g}m"
-        return (base + (f"/top{self.pool}" if self.pool else "") + ("" if self.quality else "/noq")
+        rules = "" if self.quality is True else "/noq" if self.quality is False else f"/q_{self.quality}"
+        return (base + (f"/top{self.pool}" if self.pool else "") + rules
                 + (f"/if_{self.when}" if self.when else ""))
 
 
@@ -239,7 +246,7 @@ class Context:
             return exit_ / entry - 1
 
 
-def _judged(ctx: Context, i: int, cols: np.ndarray, quality: bool) -> np.ndarray:
+def _judged(ctx: Context, i: int, cols: np.ndarray, quality: bool | str) -> np.ndarray:
     """Names the value screen could judge on row ``i``: facts computed and usable,
     and -- with ``quality`` -- no quality exclusion tripped. As live, a name that
     cannot be judged is neither a pick nor in the pool."""
@@ -247,7 +254,14 @@ def _judged(ctx: Context, i: int, cols: np.ndarray, quality: bool) -> np.ndarray
     keep = []
     for j in cols:
         f = known.get(str(ctx.symbols[j]))
-        if f is None or f.error or (quality and f.tripped):
+        if f is None or f.error:
+            continue
+        if isinstance(quality, str):
+            from .quality_rules import RULES
+
+            if not getattr(f, "metrics", None) or RULES[quality](f.metrics):
+                continue  # no metrics (facts cached before they kept them) is not a pass
+        elif quality and f.tripped:
             continue
         keep.append(j)
     return np.array(keep, dtype=int)
