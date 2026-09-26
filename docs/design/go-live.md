@@ -47,7 +47,19 @@ daily histories, delisted names included; tuned before 2020, tested from 2020.
   picked +4.6% a holding better (t 3.1) and +9.9% on the test dates (t 1.6,
   74 overlapping months). Ranking those 60 by liquidity alone gets most of
   that: the selection beyond size is about +1-2% a holding.
-- **Value**: needs point-in-time fundamentals in the lab; next.
+- **Value** (point-in-time statements, 19,680 name-months, median 11 years
+  of history): a 3-year hold sampled monthly since 2012 is one or two
+  independent bets on each side of the split, so the lab refuses a verdict
+  rather than print the t of 13 the overlap produces. On a 1-year read the
+  live ordering adds about +2% a year over the quality survivors (t 0.8 in
+  both periods): the right sign, not evidence. Value as a style lagged the
+  S&P 500 by 16% per 3-year holding over the test dates.
+- **Value's quality exclusions drop 73% of the most liquid names**, Apple in
+  65% of months and Microsoft in 70%. "Returns on capital deteriorating" trips
+  on any downward trend steeper than 0.75pp a year however high the level
+  (Apple 44% -> 27% ROIC), and "earnings not backed by cash" trips on
+  receivables growth alone with cash conversion at 1.55x. A mandate decision:
+  proposed next is to test relative versions of both rules as lab variants.
 
 ## Two things to hold onto
 
