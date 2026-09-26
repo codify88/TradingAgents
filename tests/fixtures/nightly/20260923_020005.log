@@ -1,0 +1,234 @@
+=== nightly run 20260923_020005 ===
+mandate=equity_value max_names=3 picks=8 controls=4 budget=60
+
+--- step 1: screen (no model calls) ---
+Screening for equity_value as of 2026-09-23…
+                                                                                 Screen 2026-09-23_equity_value_070237                                                                                  
+
+Mandate equity_value as of 2026-09-23 (run 2026-09-23T07:02:37).                                                                                                                                        
+
+Funnel                                                                                                                                                                                                  
+
+                                            
+ Tier              Examined  Kept   Dropped 
+ ────────────────────────────────────────── 
+ universe          5,395     5,395  0       
+ price             5,395     2,597  2,798   
+ liquidity budget  2,597     60     2,537   
+ fundamental       60        15     45      
+                                            
+
+Why names were dropped                                                                                                                                                                                  
+
+price                                                                                                                                                                                                   
+
+ • 1,468 — price below $5                                                                                                                                                                               
+ • 1,055 — median dollar volume below $5,000,000                                                                                                                                                        
+ • 145 — no price history                                                                                                                                                                               
+ • 130 — insufficient price history                                                                                                                                                                     
+
+liquidity budget                                                                                                                                                                                        
+
+ • 2,537 — outside the 60 most liquid survivors (not a judgement on the name)                                                                                                                           
+
+fundamental                                                                                                                                                                                             
+
+ • 32 — Returns on capital structurally poor or deteriorating                                                                                                                                           
+ • 12 — Accounting quality: earnings not backed by cash                                                                                                                                                 
+ • 1 — Leverage threatens solvency in an ordinary downturn                                                                                                                                              
+
+Exclusions are the mandate's own hard disqualifiers, run in reverse, and only where the data says TRIPPED. A WATCH is exactly the contestable call the analyst debate exists to make, and NO DATA is not
+evidence of anything, so neither excludes.                                                                                                                                                              
+
+Shortlist                                                                                                                                                                                               
+
+Ordered by: FCF yield percentile against the company's own ten-year history (high = cheap vs itself). This is the one place the screen expresses a preference; everything above it was exclusion. If the
+picks systematically beat the controls below, that ordering is earning its keep. If they do not, it is not.                                                                                             
+
+                              
+ Rank  Symbol  Ordering value 
+ ──────────────────────────── 
+ 1     NFLX    +0.850         
+ 2     AMD     +0.750         
+ 3     MA      +0.650         
+ 4     QCOM    +0.350         
+ 5     META    +0.286         
+ 6     LLY     +0.250         
+ 7     TSM     +0.200         
+ 8     ASML    +0.200         
+                              
+
+Control group                                                                                                                                                                                           
+
+Drawn at random (seed 1707191321) from the 15 names that cleared every exclusion but were not ranked into the shortlist. Run these through the loop too: they are the only way to tell whether the      
+ordering adds anything over picking an eligible name at random.                                                                                                                                         
+
+                        
+ Symbol  Ordering value 
+ ────────────────────── 
+ JNJ     +0.000         
+ GOOGL   +0.100         
+ MSFT    +0.000         
+ AMAT    +0.050         
+                        
+
+Manifest: /Users/jeremysmith/.tradingagents/logs/screens/2026-09-23_equity_value_070237.json
+Run the shortlist and its control through the loop:
+  tradingagents screen-run 070237
+or, equivalently:
+  tradingagents backtest NFLX,AMD,MA,QCOM,META,LLY,TSM,ASML,JNJ,GOOGL,MSFT,AMAT --start 2026-09-23 --end 2026-09-23 --mandate equity_value
+
+--- step 2: adjudicate at most 3 equity_value names ---
+Screen 2019-09-03_equity_value_132108 (equity_value, as of 2019-09-03): 12 names to decide -- picks PYPL, REGN, SBUX, NXPI, BMY, SIRI; controls ILMN, NKE, FDX, ADBE, DAL, LVS. About 96 minutes.
+Backtest cell PYPL 2019-09-03 failed: No OHLCV data available for PYPL.
+Backtest cell REGN 2019-09-03 failed: No OHLCV data available for REGN.
+Backtest cell SBUX 2019-09-03 failed: No OHLCV data available for SBUX.
+Resolved cells: 0 · pending: 0
+
+Alpha is measured over the configured window after each analysis date. One model sampling per cell, and text feeds are not archived, so these figures are indicative rather than repeatable.
+
+Ran 0 names, skipped 0. Log: /Users/jeremysmith/.tradingagents/logs/backtest/scr_20190903_value_132108/trading_memory.md
+failed: PYPL 2019-09-03: No OHLCV data available for PYPL. -- run again to retry
+failed: REGN 2019-09-03: No OHLCV data available for REGN. -- run again to retry
+failed: SBUX 2019-09-03: No OHLCV data available for SBUX. -- run again to retry
+Decisions settle once the mandate's horizon has traded; `tradingagents screen-review` scores picks against the control then.
+Screen 2020-09-01_equity_value_133346 (equity_value, as of 2020-09-01): 12 names to decide -- picks LOW, MRSN, ABBV, REGN, HD, CSCO; controls HON, HURA, PG, UNH, UPS, ADBE. About 96 minutes.
+Backtest cell LOW 2020-09-01 failed: No OHLCV data available for LOW.
+$MRSN: possibly delisted; no timezone found
+$MRSN: possibly delisted; no timezone found
+$MRSN: possibly delisted; no timezone found
+$MRSN: possibly delisted; no timezone found
+
+1 Failed download:
+['MRSN']: possibly delisted; no timezone found
+
+1 Failed download:
+['MRSN']: possibly delisted; no timezone found
+
+1 Failed download:
+['MRSN']: possibly delisted; no timezone found
+$MRSN: possibly delisted; no timezone found
+
+1 Failed download:
+['MRSN']: possibly delisted; no timezone found
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Backtest cell ABBV 2020-09-01 failed: No OHLCV data available for ABBV.
+$MRSN: possibly delisted; no timezone found
+Resolved cells: 1 · pending: 0
+- Underweight: n=1, called the direction 100%, mean alpha -130.80% vs the benchmark
+
+Conviction (does a stronger rating mean a bigger move in its direction?):
+- Ratings as position tilts (full size for the strongest calls, half for the moderate ones): mean tilted alpha +65.40% per cell.
+- Rank correlation, conviction vs alpha: n/a (needs varied ratings and 5+ cells).
+- Too few settled cells to rank: Underweight (n=1) -- 5 each needed.
+
+Alpha is measured over 756 trading days after each analysis date. One model sampling per cell, and text feeds are not archived, so these figures are indicative rather than repeatable.
+
+Ran 1 names, skipped 0. Log: /Users/jeremysmith/.tradingagents/logs/backtest/scr_20200901_value_133346/trading_memory.md
+failed: LOW 2020-09-01: No OHLCV data available for LOW. -- run again to retry
+failed: ABBV 2020-09-01: No OHLCV data available for ABBV. -- run again to retry
+Decisions settle once the mandate's horizon has traded; `tradingagents screen-review` scores picks against the control then.
+Screen 2021-03-01_equity_value_134502 (equity_value, as of 2021-03-01): 12 names to decide -- picks INTC, COST, MRSN, HURA, META, LMT; controls AMAT, AMZN, PEP, PG, CSCO, UNH. About 96 minutes.
+Backtest cell INTC 2021-03-01 failed: No OHLCV data available for INTC.
+Backtest cell COST 2021-03-01 failed: No OHLCV data available for COST.
+Resolved cells: 0 · pending: 0
+
+Alpha is measured over the configured window after each analysis date. One model sampling per cell, and text feeds are not archived, so these figures are indicative rather than repeatable.
+
+Ran 0 names, skipped 0. Log: /Users/jeremysmith/.tradingagents/logs/backtest/scr_20210301_value_134502/trading_memory.md
+failed: INTC 2021-03-01: No OHLCV data available for INTC. -- run again to retry
+failed: COST 2021-03-01: No OHLCV data available for COST. -- run again to retry
+Decisions settle once the mandate's horizon has traded; `tradingagents screen-review` scores picks against the control then.
+Screen 2021-09-01_equity_value_135620 (equity_value, as of 2021-09-01): 12 names to decide -- picks ZM, INTC, QCOM, UNP, MTVA, COST; controls NKE, V, TXN, LLY, META, HURA. About 96 minutes.
+Backtest cell ZM 2021-09-01 failed: No OHLCV data available for ZM.
+Backtest cell INTC 2021-09-01 failed: No OHLCV data available for INTC.
+Resolved cells: 0 · pending: 0
+
+Alpha is measured over the configured window after each analysis date. One model sampling per cell, and text feeds are not archived, so these figures are indicative rather than repeatable.
+
+Ran 0 names, skipped 0. Log: /Users/jeremysmith/.tradingagents/logs/backtest/scr_20210901_value_135620/trading_memory.md
+failed: ZM 2021-09-01: No OHLCV data available for ZM. -- run again to retry
+failed: INTC 2021-09-01: No OHLCV data available for INTC. -- run again to retry
+Decisions settle once the mandate's horizon has traded; `tradingagents screen-review` scores picks against the control then.
+Screen 2022-03-01_equity_value_140951 (equity_value, as of 2022-03-01): 12 names to decide -- picks META, ZM, AMD, ASML, PYPL, UPS; controls LMT, MRK, MA, HON, PFE, FCX. About 96 minutes.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Resolved cells: 2 · pending: 0
+- Overweight: n=1, called the direction 100%, mean alpha +184.10% vs the benchmark
+- Hold: n=1, no direction claimed, mean alpha -64.20% vs the benchmark
+
+Conviction (does a stronger rating mean a bigger move in its direction?):
+- Ratings as position tilts (full size for the strongest calls, half for the moderate ones): mean tilted alpha +46.02% per cell.
+- Rank correlation, conviction vs alpha: n/a (needs varied ratings and 5+ cells).
+- Too few settled cells to rank: Overweight (n=1), Hold (n=1) -- 5 each needed.
+
+Alpha is measured over 756 trading days after each analysis date. One model sampling per cell, and text feeds are not archived, so these figures are indicative rather than repeatable.
+
+Ran 2 names, skipped 0. Log: /Users/jeremysmith/.tradingagents/logs/backtest/scr_20220301_value_140951/trading_memory.md
+Decisions settle once the mandate's horizon has traded; `tradingagents screen-review` scores picks against the control then.
+Stopped at the --max-names 3 budget; the rest stay undecided for the next run.
+
+--- summary ---
+                                                                                           Screen performance                                                                                           
+
+Each row compares the shortlist against the random control drawn from the same eligible pool on the same date. The control column is the benchmark that matters: beating the market while losing to your
+own control means the exclusions are working and the ordering is not.                                                                                                                                   
+
+Screen ids are the time suffix of the manifest filename under results_dir/screens/.                                                                                                                     
+
+Alpha is measured against each mandate's own benchmark, as logged.                                                                                                                                      
+
+                                                                       
+ Screen  Style  As of       Picks  Picks α  Control  Control α  Edge   
+ ───────────────────────────────────────────────────────────────────── 
+ 132108  value  2019-09-03  0/6    —        0/6      —          —      
+ 133346  value  2020-09-01  1/6    -130.8%  0/6      —          —      
+ 134502  value  2021-03-01  0/6    —        0/6      —          —      
+ 135620  value  2021-09-01  0/6    —        0/6      —          —      
+ 140951  value  2022-03-01  2/6    +59.9%   0/6      —          —      
+ 142451  value  2022-09-01  1/6    +170.3%  0/6      —          —      
+ 143752  value  2023-03-01  0/6    —        0/6      —          —      
+ 104324  value  2023-09-01  6/6    -37.4%   6/6      -14.1%     -23.3% 
+ 105414  value  2024-03-01  6/6    -19.7%   6/6      -13.9%     -5.8%  
+ 160333  value  2026-09-17  0/3    —        0/0      —          —      
+ 172950  value  2026-09-22  0/4    —        0/0      —          —      
+ 070237  value  2026-09-23  0/8    —        0/4      —          —      
+                                                                       
+
+Verdict                                                                                                                                                                                                 
+
+Across 5 screen(s), picks averaged +8.5% alpha against -14.0% for the controls (edge +22.5%).                                                                                                           
+
+Read the persistence of the sign across screens rather than the magnitude of any one of them.                                                                                                           
+
+=== finished 07:28:47, screen-run exit=0 ===
+Read the reports with: tradingagents report

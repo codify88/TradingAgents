@@ -1,0 +1,164 @@
+=== nightly run 20260925_021157 ===
+mandate=equity_value max_names=3 picks=8 controls=4 budget=60
+
+--- step 1: screen (no model calls) ---
+Screening for equity_value as of 2026-09-25…
+                                                                                 Screen 2026-09-25_equity_value_083641                                                                                  
+
+Mandate equity_value as of 2026-09-25 (run 2026-09-25T08:36:41).                                                                                                                                        
+
+Funnel                                                                                                                                                                                                  
+
+                                            
+ Tier              Examined  Kept   Dropped 
+ ────────────────────────────────────────── 
+ universe          5,398     5,398  0       
+ price             5,398     2,592  2,806   
+ liquidity budget  2,592     60     2,532   
+ fundamental       60        15     45      
+                                            
+
+Why names were dropped                                                                                                                                                                                  
+
+price                                                                                                                                                                                                   
+
+ • 1,481 — price below $5                                                                                                                                                                               
+ • 1,050 — median dollar volume below $5,000,000                                                                                                                                                        
+ • 145 — no price history                                                                                                                                                                               
+ • 130 — insufficient price history                                                                                                                                                                     
+
+liquidity budget                                                                                                                                                                                        
+
+ • 2,532 — outside the 60 most liquid survivors (not a judgement on the name)                                                                                                                           
+
+fundamental                                                                                                                                                                                             
+
+ • 32 — Returns on capital structurally poor or deteriorating                                                                                                                                           
+ • 12 — Accounting quality: earnings not backed by cash                                                                                                                                                 
+ • 1 — Leverage threatens solvency in an ordinary downturn                                                                                                                                              
+
+Exclusions are the mandate's own hard disqualifiers, run in reverse, and only where the data says TRIPPED. A WATCH is exactly the contestable call the analyst debate exists to make, and NO DATA is not
+evidence of anything, so neither excludes.                                                                                                                                                              
+
+Shortlist                                                                                                                                                                                               
+
+Ordered by: FCF yield percentile against the company's own ten-year history (high = cheap vs itself). This is the one place the screen expresses a preference; everything above it was exclusion. If the
+picks systematically beat the controls below, that ordering is earning its keep. If they do not, it is not.                                                                                             
+
+                              
+ Rank  Symbol  Ordering value 
+ ──────────────────────────── 
+ 1     NFLX    +0.850         
+ 2     AMD     +0.750         
+ 3     MA      +0.600         
+ 4     QCOM    +0.350         
+ 5     LLY     +0.250         
+ 6     META    +0.214         
+ 7     TSM     +0.200         
+ 8     ASML    +0.200         
+                              
+
+Control group                                                                                                                                                                                           
+
+Drawn at random (seed 1423620407) from the 15 names that cleared every exclusion but were not ranked into the shortlist. Run these through the loop too: they are the only way to tell whether the      
+ordering adds anything over picking an eligible name at random.                                                                                                                                         
+
+                        
+ Symbol  Ordering value 
+ ────────────────────── 
+ JNJ     +0.000         
+ CAT     +0.050         
+ MSFT    +0.000         
+ GOOGL   +0.100         
+                        
+
+Manifest: /Users/jeremysmith/.tradingagents/logs/screens/2026-09-25_equity_value_083641.json
+Run the shortlist and its control through the loop:
+  tradingagents screen-run 083641
+or, equivalently:
+  tradingagents backtest NFLX,AMD,MA,QCOM,LLY,META,TSM,ASML,JNJ,CAT,MSFT,GOOGL --start 2026-09-25 --end 2026-09-25 --mandate equity_value
+
+--- step 2: adjudicate at most 3 equity_value names ---
+Screen 2019-09-03_equity_value_132108 (equity_value, as of 2019-09-03): 9 names to decide -- picks NXPI, BMY, SIRI; controls ILMN, NKE, FDX, ADBE, DAL, LVS. About 72 minutes.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Vendor 'fred' not configured for get_macro_indicators; trying next vendor.
+Optional macro_data unavailable for get_macro_indicators: FRED_API_KEY environment variable is not set. Get a free key at https://fred.stlouisfed.org/docs/api/api_key.html.
+Resolved cells: 6 · pending: 0
+- Hold: n=3, no direction claimed, mean alpha -16.50% vs the benchmark
+- Overweight: n=3, called the direction 67%, mean alpha +34.00% vs the benchmark
+
+Conviction (does a stronger rating mean a bigger move in its direction?):
+- Ratings as position tilts (full size for the strongest calls, half for the moderate ones): mean tilted alpha +8.50% per cell.
+- Rank correlation, conviction vs alpha: +0.68 over 6 cells (positive: stronger calls did better in their direction).
+- Too few settled cells to rank: Overweight (n=3), Hold (n=3) -- 5 each needed.
+
+Alpha is measured over 756 trading days after each analysis date. One model sampling per cell, and text feeds are not archived, so these figures are indicative rather than repeatable.
+
+Ran 3 names, skipped 0. Log: /Users/jeremysmith/.tradingagents/logs/backtest/scr_20190903_value_132108/trading_memory.md
+Decisions settle once the mandate's horizon has traded; `tradingagents screen-review` scores picks against the control then.
+Stopped at the --max-names 3 budget; the rest stay undecided for the next run.
+
+--- summary ---
+                                                                                           Screen performance                                                                                           
+
+Each row compares the shortlist against the random control drawn from the same eligible pool on the same date. The control column is the benchmark that matters: beating the market while losing to your
+own control means the exclusions are working and the ordering is not.                                                                                                                                   
+
+Screen ids are the time suffix of the manifest filename under results_dir/screens/.                                                                                                                     
+
+Alpha is measured against each mandate's own benchmark, as logged.                                                                                                                                      
+
+                                                                       
+ Screen  Style  As of       Picks  Picks α  Control  Control α  Edge   
+ ───────────────────────────────────────────────────────────────────── 
+ 132108  value  2019-09-03  6/6    +8.8%    0/6      —          —      
+ 133346  value  2020-09-01  1/6    -130.8%  0/6      —          —      
+ 134502  value  2021-03-01  0/6    —        0/6      —          —      
+ 135620  value  2021-09-01  0/6    —        0/6      —          —      
+ 140951  value  2022-03-01  0/6    —        0/6      —          —      
+ 142451  value  2022-09-01  1/6    +170.3%  0/6      —          —      
+ 143752  value  2023-03-01  0/6    —        0/6      —          —      
+ 104324  value  2023-09-01  6/6    -37.4%   6/6      -14.1%     -23.3% 
+ 105414  value  2024-03-01  6/6    -19.7%   6/6      -13.9%     -5.8%  
+ 160333  value  2026-09-17  0/3    —        0/0      —          —      
+ 172950  value  2026-09-22  0/4    —        0/0      —          —      
+ 070237  value  2026-09-23  0/8    —        0/4      —          —      
+ 024352  value  2026-09-24  0/8    —        0/4      —          —      
+ 083641  value  2026-09-25  0/8    —        0/4      —          —      
+                                                                       
+
+Verdict                                                                                                                                                                                                 
+
+Across 5 screen(s), picks averaged -1.8% alpha against -14.0% for the controls (edge +12.2%).                                                                                                           
+
+Read the persistence of the sign across screens rather than the magnitude of any one of them.                                                                                                           
+
+=== finished 09:01:32, screen-run exit=0 ===
+Read the reports with: tradingagents report
