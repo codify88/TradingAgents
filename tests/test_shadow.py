@@ -61,3 +61,20 @@ def test_records_are_pending_until_their_week_has_traded(config, monkeypatch):
     assert cand.selection == pytest.approx(cand.selection_when_held)
     text = shadow.render(list(done.values()), [])
     assert "never traded" in text and "liquidity/p8/dv5m" in text
+
+
+def test_a_thin_last_day_is_not_recorded_and_its_breadth_is_withheld(config):
+    import numpy as np
+
+    from tradingagents.lab import regime
+
+    full = _panel(n_names=30, days=420)
+    thin = _cut(full, 400)
+    for f in (thin.close, thin.open, thin.raw_close, thin.volume):
+        f.iloc[-1, :25] = np.nan  # only five histories refreshed after the last close
+    assert lp.last_day_thin(thin) and lp.last_day_thin(_cut(full, 400)) is None
+    with pytest.raises(shadow.ThinDay, match="only"):
+        shadow.record(config, rp.Context(thin, _unis(full)))
+    assert shadow.records(config) == []
+    b = regime.breadth(thin, 50)
+    assert np.isnan(b.iloc[-1]) and not np.isnan(b.iloc[-2])

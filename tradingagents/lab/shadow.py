@@ -33,6 +33,11 @@ SHADOW = {
 }
 
 
+class ThinDay(RuntimeError):
+    """The panel's last day is missing most names' closes; recording from it
+    would bias the pool toward whatever was refreshed first."""
+
+
 def _path(config: dict):
     return lab_dir(config) / "shadow.jsonl"
 
@@ -47,7 +52,11 @@ def records(config: dict) -> list[dict]:
 def record(config: dict, ctx: Context, strategy: str = "standard") -> list[dict]:
     """Record each shadow variant's picks from the panel's last close; a date
     already recorded (a weekend night re-reading Friday's close) is skipped."""
+    from .panel import last_day_thin
+
     spec = STRATEGIES[strategy]
+    if ctx.panel is not None and (why := last_day_thin(ctx.panel)):
+        raise ThinDay(why)
     i = len(ctx.dates) - 1
     day = ctx.dates[i].strftime("%Y-%m-%d")
     have = {(r["variant"], r["date"]) for r in records(config)}

@@ -273,3 +273,33 @@ def load_panel(config: dict) -> Panel | None:
             return pickle.load(fh)
     except (OSError, pickle.UnpicklingError, EOFError):
         return None
+
+
+# A day is thin when fewer names have its close than this share of the usual
+# count: the panel's newest row holds only histories refreshed after that
+# close, so a rebuild before the nightly refresh has a large-cap-heavy last day.
+THIN_DAY = 0.9
+
+
+def closes_per_day(panel: Panel):
+    """How many names have a close on each day."""
+    return panel.close.notna().sum(axis=1)
+
+
+def thin_days(panel: Panel, ratio: float = THIN_DAY, window: int = 20):
+    """True on days whose close count is below ``ratio`` of the trailing median."""
+    n = closes_per_day(panel)
+    typical = n.shift(1).rolling(window, min_periods=5).median()
+    return n < ratio * typical
+
+
+def last_day_thin(panel: Panel) -> str | None:
+    """Why the panel's last day cannot be read yet, or None when it is complete."""
+    if panel.close.empty:
+        return "the price panel is empty"
+    n = closes_per_day(panel)
+    typical = float(n.iloc[-21:-1].median()) if len(n) > 5 else float("nan")
+    if typical == typical and n.iloc[-1] < THIN_DAY * typical:
+        return (f"only {int(n.iloc[-1]):,} names have a {panel.dates[-1]:%Y-%m-%d} close, against a usual "
+                f"{int(typical):,}: the panel was built before most histories were refreshed")
+    return None

@@ -177,7 +177,20 @@ def breadth(panel, trend_ma: int, min_dollar_volume: float = 5e6) -> pd.Series:
     liquid = (panel.raw_close * panel.volume).rolling(20, min_periods=10).median() > min_dollar_volume
     base = liquid & known
     n = base.sum(axis=1)
-    return ((above & base).sum(axis=1) / n.replace(0, np.nan)).astype(float)
+    share = ((above & base).sum(axis=1) / n.replace(0, np.nan)).astype(float)
+    # A day few names have closes for is a sample of whichever histories were
+    # refreshed first -- mostly large caps -- not the market: left blank.
+    from .panel import thin_days
+
+    return share.mask(thin_days(panel))
+
+
+def breadth_names(panel, trend_ma: int, min_dollar_volume: float = 5e6) -> pd.Series:
+    """How many liquid names each day's breadth is read from."""
+    close = panel.close
+    known = close.rolling(trend_ma, min_periods=trend_ma).mean().notna() & close.notna()
+    liquid = (panel.raw_close * panel.volume).rolling(20, min_periods=10).median() > min_dollar_volume
+    return (liquid & known).sum(axis=1)
 
 
 def compute(panel, profile: str | Profile, symbol: str = BENCHMARK) -> pd.DataFrame:
@@ -191,6 +204,7 @@ def compute(panel, profile: str | Profile, symbol: str = BENCHMARK) -> pd.DataFr
     out = pd.DataFrame({
         "close": close, "trend": t, "shape": shape, "days": days, "er": raw["er"], "band": raw["band"], "vol": vol,
         "drawdown": drawdown, "breadth": breadth(panel, p.trend_ma).reindex(close.index),
+        "breadth_names": breadth_names(panel, p.trend_ma).reindex(close.index),
     })
     out["stressed"] = (out["trend"] == "down") | (out["vol"] > p.stress_vol)
     return out
@@ -214,6 +228,7 @@ def summary(states: pd.DataFrame) -> dict:
             "days": int(last["days"]), "er": _f(last["er"]), "band": _f(last["band"]),
             "vol": _f(last["vol"]),
             "drawdown": _f(last["drawdown"]), "breadth": _f(last["breadth"]),
+            "breadth_names": int(last["breadth_names"]) if "breadth_names" in last and last["breadth_names"] == last["breadth_names"] else None,
             "stressed": bool(last["stressed"])}
 
 

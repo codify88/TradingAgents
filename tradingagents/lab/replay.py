@@ -152,6 +152,7 @@ class Context:
                          for d, syms in universes.items()}
         self._cache: dict[tuple, np.ndarray] = {}
         self._panel = panel
+        self.panel = panel
         self._states: dict[str, pd.DataFrame] = {}
         self.facts: dict[str, dict] = {}  # date -> {symbol: lab.fundamentals.Facts}, for value replays
 

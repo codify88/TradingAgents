@@ -1934,7 +1934,12 @@ def lab_shadow(
         console.print("[red]No price panel yet: run `tradingagents lab prices` first.[/red]")
         raise typer.Exit(code=1)
     ctx = replay.Context(p, panel.universes(DEFAULT_CONFIG, dates=[]))
-    latest = shadow.record(DEFAULT_CONFIG, ctx) if record else []
+    latest = []
+    if record:
+        try:
+            latest = shadow.record(DEFAULT_CONFIG, ctx)
+        except shadow.ThinDay as exc:
+            console.print(f"[yellow]Nothing recorded: {exc}.[/yellow]")
     console.print(Markdown(shadow.render(shadow.score(DEFAULT_CONFIG, ctx), latest)))
 
 
@@ -1958,7 +1963,10 @@ def lab_regime(
             f"\n[bold]{name}[/bold] view ({used}; {prof.trend_ma}-day trend, {prof.shape}-day shape) "
             f"as of {cur['as_of']}: trend [bold]{cur['trend']}[/bold], shape [bold]{cur['shape']}[/bold] "
             f"for {cur['days']} day(s); volatility {cur['vol']:.0%}, {cur['drawdown']:+.1%} from the "
-            f"1-year high, {cur['breadth']:.0%} of liquid names above their {prof.trend_ma}-day average"
+            f"1-year high, "
+            + (f"{cur['breadth']:.0%} of {cur.get('breadth_names') or 0:,} liquid names above their "
+               f"{prof.trend_ma}-day average" if cur["breadth"] is not None else
+               "breadth withheld: too few names have that day's close yet")
             + ("; [bold]stressed[/bold]" if cur["stressed"] else "") + ".")
         runs = rg.episodes(states)
         for r in runs[runs.end >= episodes_since].itertuples():
