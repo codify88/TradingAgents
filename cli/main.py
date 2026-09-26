@@ -1922,6 +1922,22 @@ def lab_adopt(
                      "recorded, but this strategy's live screen does not read adoptions yet."))
 
 
+@lab_app.command(name="shadow")
+def lab_shadow(
+    record: bool = typer.Option(False, "--record", help="Record tonight's shadow picks first (the nightly does)."),
+):
+    """Shadow picks: what candidate variants pick each night, recorded and scored forward, never traded."""
+    from tradingagents.lab import panel, replay, shadow
+
+    p = panel.load_panel(DEFAULT_CONFIG)
+    if p is None:
+        console.print("[red]No price panel yet: run `tradingagents lab prices` first.[/red]")
+        raise typer.Exit(code=1)
+    ctx = replay.Context(p, panel.universes(DEFAULT_CONFIG, dates=[]))
+    latest = shadow.record(DEFAULT_CONFIG, ctx) if record else []
+    console.print(Markdown(shadow.render(shadow.score(DEFAULT_CONFIG, ctx), latest)))
+
+
 @lab_app.command(name="regime")
 def lab_regime(
     episodes_since: str = typer.Option("2025-01-01", "--since", help="List the shape's runs from this date."),

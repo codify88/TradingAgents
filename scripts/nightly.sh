@@ -89,6 +89,12 @@ echo "--- market state: panel from stored prices, then the labels [$(date +%H:%M
     && "$TRADINGAGENTS" lab regime --since "$(date -v-10d +%Y-%m-%d)" < /dev/null \
     || echo "market state not refreshed; Desk shows the last one."
 
+# Shadow picks: what the candidate variants pick from tonight's close, recorded
+# beside the live ordering and scored once their week has traded. Never traded,
+# no model calls; the forward test the lab's past cannot give (lab/shadow.py).
+echo "--- shadow picks [$(date +%H:%M:%S)] ---"
+"$TRADINGAGENTS" lab shadow --record < /dev/null || echo "shadow picks not recorded tonight."
+
 if [ "$STANDARD_NAMES" -gt 0 ]; then
     echo
     # Only today's screen, and only when today has an open to trade it at: a

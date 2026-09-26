@@ -172,15 +172,20 @@ class Context:
         for (symbol, day), f in facts.items():
             self.facts.setdefault(day, {})[symbol] = f
 
-    def liquid_eligible(self, i: int, min_dollar_volume: float, pool: int | None) -> np.ndarray:
+    def liquid_eligible(self, i: int, min_dollar_volume: float, pool: int | None,
+                        need_next_open: bool = True) -> np.ndarray:
         """Eligible names on row ``i`` (listed, a year of closes, >= $5 as traded, above
-        the liquidity floor, trading the next day), most liquid first, at most ``pool``."""
+        the liquidity floor, trading the next day), most liquid first, at most ``pool``.
+
+        ``need_next_open=False`` is for a live record made before that open exists
+        (the shadow picks): the name's next day is not known yet, so it is not asked."""
         cols = self.members(i)
-        if cols.size == 0 or i + 1 >= len(self.dates):
+        if cols.size == 0 or (need_next_open and i + 1 >= len(self.dates)):
             return cols[:0]
         ok = (self.history_ok(i)[cols] & (self.RC[i, cols] >= MIN_PRICE)
-              & (self.dollar_volume(i)[cols] >= min_dollar_volume)
-              & ~np.isnan(self.O[i + 1, cols]))
+              & (self.dollar_volume(i)[cols] >= min_dollar_volume))
+        if need_next_open:
+            ok &= ~np.isnan(self.O[i + 1, cols])
         cols = cols[ok]
         if pool and cols.size > pool:
             cols = cols[np.argsort(-self.dollar_volume(i)[cols], kind="stable")[:pool]]
@@ -322,6 +327,46 @@ class Row:
         return self.picks - self.pool
 
 
+@dataclass
+class Selection:
+    """What a variant picks on one date: its picks, the rest of the eligible pool,
+    and which ordering it used (a switching variant may have changed it, or sat out)."""
+
+    chosen: np.ndarray
+    pool: np.ndarray
+    signal: str
+    cash: bool
+    condition: bool | None    # whether the variant's market-state condition held; None if it has none
+
+
+def select(ctx: Context, strategy: Strategy, variant: Variant, i: int, seed: int = 7,
+           need_next_open: bool = True) -> Selection | None:
+    """The variant's picks on row ``i`` from closes up to that day. The replay and
+    the nightly shadow record both call this, so what is recorded forward is
+    exactly what was tested backward."""
+    cols = ctx.liquid_eligible(i, variant.min_dollar_volume, variant.pool, need_next_open)
+    if cols.size == 0:
+        return None
+    if strategy.fundamentals:
+        cols = _judged(ctx, i, cols, variant.quality)
+    signal, cash, held = variant.signal, False, None
+    if variant.when:
+        condition, alt = variant.when.split(":")
+        held = ctx.holds(condition, i)
+        if held:
+            signal, cash = (variant.signal, True) if alt == "cash" else (alt, False)
+    score = _signal(ctx, signal, i, seed)[cols] if cols.size else cols.astype(float)
+    keep = ~np.isnan(score)
+    cols, score = cols[keep], score[keep]
+    if cols.size <= variant.picks:
+        return None
+    order = np.argsort(-score, kind="stable")
+    chosen, pool = cols[order[:variant.picks]], cols[order[variant.picks:]]
+    if cash:  # sitting out: the picks earn nothing, and the whole eligible set is the pool
+        chosen, pool = chosen[:0], cols
+    return Selection(chosen, pool, signal, cash, held)
+
+
 def replay(ctx: Context, strategy: Strategy, variant: Variant, dates: list[int],
            seed: int = 7, horizon: int | None = None) -> list[Row]:
     horizon = horizon or strategy.horizon
@@ -330,36 +375,20 @@ def replay(ctx: Context, strategy: Strategy, variant: Variant, dates: list[int],
     for i in dates:
         if i + 1 + horizon >= len(ctx.dates):
             continue
-        cols = ctx.liquid_eligible(i, variant.min_dollar_volume, variant.pool)
-        if cols.size == 0:
+        sel = select(ctx, strategy, variant, i, seed)
+        if sel is None:
             continue
-        if strategy.fundamentals:
-            cols = _judged(ctx, i, cols, variant.quality)
-        signal, cash = variant.signal, False
-        if variant.when:
-            condition, alt = variant.when.split(":")
-            if ctx.holds(condition, i):
-                signal, cash = (variant.signal, True) if alt == "cash" else (alt, False)
-        score = _signal(ctx, signal, i, seed)[cols] if cols.size else cols.astype(float)
-        keep = ~np.isnan(score)
-        cols, score = cols[keep], score[keep]
-        if cols.size <= variant.picks:
-            continue
-        order = np.argsort(-score, kind="stable")
-        chosen, pool = cols[order[:variant.picks]], cols[order[variant.picks:]]
-        if cash:  # sitting out: the picks earn nothing, and the whole eligible set is the pool
-            chosen, pool = chosen[:0], cols
-        fwd_p, fwd_c = ctx.forward(i, horizon, chosen), ctx.forward(i, horizon, pool)
+        fwd_p, fwd_c = ctx.forward(i, horizon, sel.chosen), ctx.forward(i, horizon, sel.pool)
 
         def one(sym: str, i: int = i) -> float:
             j = bench.get(sym)
             return float(ctx.forward(i, horizon, np.array([j]))[0]) if j is not None else math.nan
 
         out.append(Row(
-            date=ctx.dates[i].strftime("%Y-%m-%d"), eligible=int(cols.size),
-            picks=0.0 if cash else _nanmean(fwd_p), pool=_nanmean(fwd_c),
+            date=ctx.dates[i].strftime("%Y-%m-%d"), eligible=int(sel.pool.size + (0 if sel.cash else sel.chosen.size)),
+            picks=0.0 if sel.cash else _nanmean(fwd_p), pool=_nanmean(fwd_c),
             market=one("SPY"), equal=one("RSP"), style=one(strategy.style),
-            chosen=[str(s) for s in ctx.symbols[chosen]]))
+            chosen=[str(s) for s in ctx.symbols[sel.chosen]]))
     return out
 
 
