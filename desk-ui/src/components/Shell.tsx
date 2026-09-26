@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { BookOpen, FlaskConical, KeyRound, LayoutList, Octagon, ScrollText } from "lucide-react";
+import { Bot, BookOpen, FlaskConical, KeyRound, LayoutList, Octagon, ScrollText } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { halt } from "../api";
 import { cn } from "../cn";
@@ -7,14 +7,15 @@ import { useRefresh, useToday } from "../hooks";
 import { useToast } from "./toast";
 import { Button, Dialog, Pill } from "./ui";
 
-type NavItem = { to: string; label: string; icon: ReactNode; external?: boolean };
+type NavItem = { to: string; label: string; icon: ReactNode; external?: boolean; desktopOnly?: boolean };
 
 // Lab and Research open the v1 page until their screens land (D3, D4).
 const NAV: NavItem[] = [
   { to: "/", label: "Today", icon: <LayoutList size={18} /> },
   { to: "/book", label: "Book", icon: <BookOpen size={18} /> },
+  { to: "/agents", label: "Agents", icon: <Bot size={18} /> },
   { to: "/classic#lab", label: "Lab", icon: <FlaskConical size={18} />, external: true },
-  { to: "/classic#decisions", label: "Research", icon: <ScrollText size={18} />, external: true },
+  { to: "/classic#decisions", label: "Research", icon: <ScrollText size={18} />, external: true, desktopOnly: true },
   { to: "/security", label: "Security", icon: <KeyRound size={18} /> },
 ];
 
@@ -115,6 +116,7 @@ function HaltControl({ wide }: { wide?: boolean }) {
 
 export function Shell() {
   const today = useToday();
+  const wide = useRouterState({ select: (st) => st.location.pathname.startsWith("/agents") });
   const needs = today.data?.needs_you ?? 0;
   return (
     <div className="flex h-full">
@@ -140,12 +142,12 @@ export function Shell() {
           <HaltControl />
         </header>
         <main className="flex-1 overflow-y-auto px-4 pb-[calc(88px+env(safe-area-inset-bottom))] pt-4 md:px-8 md:pb-10 md:pt-8">
-          <div className="mx-auto max-w-3xl">
+          <div className={cn("mx-auto", wide ? "max-w-6xl" : "max-w-3xl")}>
             <Outlet />
           </div>
         </main>
         <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-rule bg-surface px-2 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 md:hidden">
-          {NAV.map((n) => (
+          {NAV.filter((n) => !n.desktopOnly).map((n) => (
             <NavLink key={n.to} item={n} compact />
           ))}
         </nav>

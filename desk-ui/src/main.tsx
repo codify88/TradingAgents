@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { Shell } from "./components/Shell";
 import { Toaster } from "./components/toast";
 import { Empty } from "./components/ui";
+import { AgentLabScreen } from "./screens/agentlab/AgentLab";
 import { BookScreen } from "./screens/Book";
 import { PlanDetailScreen } from "./screens/PlanDetail";
 import { SecurityScreen } from "./screens/Security";
@@ -18,6 +19,7 @@ const routes = [
   createRoute({ getParentRoute: () => shell, path: "/plan/$id", component: PlanDetailScreen }),
   createRoute({ getParentRoute: () => shell, path: "/book", component: BookScreen }),
   createRoute({ getParentRoute: () => shell, path: "/security", component: SecurityScreen }),
+  createRoute({ getParentRoute: () => shell, path: "/agents", component: AgentLabScreen }),
 ];
 const router = createRouter({
   routeTree: root.addChildren([shell.addChildren(routes)]),
