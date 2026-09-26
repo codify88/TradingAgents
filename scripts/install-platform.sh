@@ -13,7 +13,8 @@
 #   - the wake schedule, exported as you (tradingagents schedule export).
 #   - the nightly LaunchAgent (as you), now running scripts/platform-run.sh:
 #     the nightly run then the harvest, kept awake by caffeinate.
-#   - the Hermes gateway LaunchAgent, only if `hermes` is installed.
+#   - the Hermes gateway LaunchAgent, only if `hermes` is installed;
+#   - the Desk LaunchAgent (the web UI on localhost:8810, kept alive).
 #
 # It never changes or removes a pmset repeat you set yourself; --uninstall
 # cancels only the wakes the daemon set, and points the nightly agent back at
@@ -48,6 +49,7 @@ WAKE_PLIST=/Library/LaunchDaemons/com.jeremysmith.tradingagents.wake.plist
 AGENTS="$USER_HOME/Library/LaunchAgents"
 NIGHTLY_PLIST="$AGENTS/com.jeremysmith.tradingagents.nightly.plist"
 HERMES_PLIST="$AGENTS/com.jeremysmith.tradingagents.hermes.plist"
+DESK_PLIST="$AGENTS/com.jeremysmith.tradingagents.desk.plist"
 
 say() { echo "==> $*"; }
 run() {
@@ -92,6 +94,11 @@ if [ "$UNINSTALL" -eq 1 ]; then
         say "removing the Hermes gateway agent"
         run launchctl bootout "gui/$USER_UID" "$HERMES_PLIST" 2>/dev/null || true
         run rm -f "$HERMES_PLIST"
+    fi
+    if [ -f "$DESK_PLIST" ]; then
+        say "removing the Desk agent"
+        run launchctl bootout "gui/$USER_UID" "$DESK_PLIST" 2>/dev/null || true
+        run rm -f "$DESK_PLIST"
     fi
     if [ -f "$NIGHTLY_PLIST" ]; then
         say "pointing the nightly agent back at scripts/nightly.sh"
@@ -138,5 +145,9 @@ if [ -n "$HERMES_BIN" ]; then
 else
     say "Hermes not installed yet; skipping its agent (re-run this after installing it)"
 fi
+
+say "installing the Desk agent (http://localhost:8810, loopback only), kept alive"
+fill "$REPO/scripts/launchd/com.jeremysmith.tradingagents.desk.plist" "$DESK_PLIST" "$USER_NAME"
+reload_agent "$DESK_PLIST"
 
 say "done. Check with: pmset -g sched   and   tradingagents schedule show"

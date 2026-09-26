@@ -224,3 +224,11 @@ def test_the_hermes_agent_runs_the_host_gateway_under_an_external_supervisor():
 def test_the_nightly_agent_runs_the_chain_not_the_bare_nightly_script():
     text = (REPO / "scripts" / "launchd" / "com.jeremysmith.tradingagents.nightly.plist").read_text()
     assert "__REPO__/scripts/platform-run.sh" in text
+
+
+def test_the_desk_agent_serves_loopback_only_and_the_installer_manages_it():
+    text = (REPO / "scripts" / "launchd" / "com.jeremysmith.tradingagents.desk.plist").read_text()
+    assert "<string>desk</string>" in text and "--no-open" in text and "<key>KeepAlive</key>" in text
+    assert "0.0.0.0" not in text  # the server binds 127.0.0.1 itself; nothing here widens it
+    installer = (REPO / "scripts" / "install-platform.sh").read_text()
+    assert installer.count("$DESK_PLIST") >= 4  # defined, filled, loaded, and removed on --uninstall

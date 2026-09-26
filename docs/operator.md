@@ -31,13 +31,20 @@ unless `trading_live` is set, which nothing sets.
 
 `tradingagents trade status` shows live cohorts, the switches and the account.
 
-## Desk (the local web UI)
+## Desk (the web UI)
 
-`tradingagents desk` opens `http://127.0.0.1:8765/`: the morning report, the
-lab (adopt a variant, with its evidence recorded), the paper book (approve and
-send a plan, halt, resume, acknowledge, reconcile) and past decisions. It
-listens on this Mac only and needs the `desk` extra (`pip install -e '.[desk]'`;
-already present with `mcp`). Design: `docs/design/desk.md`.
+A LaunchAgent (`com.jeremysmith.tradingagents.desk`, kept alive) serves Desk on
+`http://localhost:8810/` -- port 8810 because brooks-bot holds 8765. Today opens
+on what needs you: the order plan with its cutoff (hold to approve, then Face
+ID / Touch ID), halts and mismatches, the night, reviews and suggestions. Book
+shows the paper account and cohorts (resume and acknowledge take a passkey;
+halt never does). The v1 page (lab adoption, decisions) is at `/classic`.
+
+- Enrol a device: `tradingagents desk code`, then Security -> Create passkey.
+- From the phone: Tailscale, set up once (steps in `docs/design/desk.md`).
+- After changing the app: `cd desk-ui && npm run build`; the agent serves
+  `desk-ui/dist` directly, no restart needed.
+- Logs: `~/.tradingagents/logs/desk.out` and `desk.err`.
 
 ## Secrets
 

@@ -121,23 +121,9 @@ def pending_reviews(within_days: int = 30, today: str | None = None) -> str:
     """Interim and final reviews of open decisions that fall due within
     ``within_days`` calendar days, plus any already overdue. A review is due
     once its horizon, in trading days after the analysis date, has passed."""
-    now = pd.Timestamp(today or date.today())
-    horizon_end = now + pd.Timedelta(days=within_days)
-    due, overdue = [], []
-    for e in _all_entries():
-        if not e.get("pending"):
-            continue
-        done = {r["days"] for r in e.get("reviews") or []}
-        for days in _mandate_horizons(e.get("mandate") or ""):
-            if days in done:
-                continue
-            when = pd.Timestamp(e["date"]) + pd.offsets.BDay(days)
-            item = (when.date(), e["ticker"], e["date"], days, e.get("mandate") or "")
-            if when < now:
-                overdue.append(item)
-            elif when <= horizon_end:
-                due.append(item)
-            break  # only the next outstanding horizon matters
+    items = review_items(within_days, today)
+    due = [(i["when"], i["ticker"], i["decided"], i["days"], i["mandate"]) for i in items if not i["overdue"]]
+    overdue = [(i["when"], i["ticker"], i["decided"], i["days"], i["mandate"]) for i in items if i["overdue"]]
     if not due and not overdue:
         return f"No reviews due in the next {within_days} days."
     lines = []
@@ -148,6 +134,26 @@ def pending_reviews(within_days: int = 30, today: str | None = None) -> str:
         lines.append(f"Due in the next {within_days} days ({len(due)}):")
         lines += [f"- {w} {t} (decided {d}), {h}-day review [{m}]" for w, t, d, h, m in sorted(due)]
     return "\n".join(lines)
+
+
+def review_items(within_days: int = 30, today: str | None = None) -> list[dict]:
+    """The reviews ``pending_reviews`` describes, as data (Desk's Today screen)."""
+    now = pd.Timestamp(today or date.today())
+    horizon_end = now + pd.Timedelta(days=within_days)
+    out: list[dict] = []
+    for e in _all_entries():
+        if not e.get("pending"):
+            continue
+        done = {r["days"] for r in e.get("reviews") or []}
+        for days in _mandate_horizons(e.get("mandate") or ""):
+            if days in done:
+                continue
+            when = pd.Timestamp(e["date"]) + pd.offsets.BDay(days)
+            if when < now or when <= horizon_end:
+                out.append({"when": when.date(), "ticker": e["ticker"], "decided": e["date"],
+                            "days": days, "mandate": e.get("mandate") or "", "overdue": bool(when < now)})
+            break  # only the next outstanding horizon matters
+    return sorted(out, key=lambda i: (i["when"], i["ticker"]))
 
 
 # -- reports -------------------------------------------------------------------------

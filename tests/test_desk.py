@@ -40,9 +40,11 @@ def _lab_run(config, key="standard", results=None):
 
 
 def _client(config, broker_factory=None, **kw):
+    """The server as the Mac itself sees it: loopback host name, no proxy."""
     app = create_app(config, token=TOKEN, broker_factory=broker_factory,
-                     allowed_hosts=kw.pop("allowed_hosts", ("testserver",)))
-    return TestClient(app, **kw)
+                     allowed_hosts=kw.pop("allowed_hosts", None), dist=kw.pop("dist", None))
+    return TestClient(app, base_url=kw.pop("base_url", "http://localhost:8810"),
+                      client=kw.pop("client", ("127.0.0.1", 50000)), **kw)
 
 
 def _no_broker(config):
@@ -107,7 +109,7 @@ def test_an_adoption_needs_a_reason_and_a_real_variant(config):
 def test_the_page_carries_the_token_and_the_api_serves_the_lab(config):
     _lab_run(config)
     c = _client(config)
-    assert TOKEN in c.get("/").text
+    assert TOKEN in c.get("/classic").text  # the v1 page; "/" is the app once built
     body = c.get("/api/lab").json()
     assert body["strategies"]["standard"]["results"]["verdict"]["passes"] is True
     assert c.get("/api/lab/standard/report").status_code == 404  # no markdown report written
@@ -125,7 +127,7 @@ def test_actions_need_the_token_and_refuse_foreign_origins(config):
                                                          "Origin": "https://evil.example"}).status_code == 403
     assert c.post("/api/trade/halt", json={}).status_code == 403
     assert adopted.current(config, "standard") is None
-    r = c.post("/api/lab/adopt", json=body, headers={"X-Desk-Token": TOKEN, "Origin": "http://testserver"})
+    r = c.post("/api/lab/adopt", json=body, headers={"X-Desk-Token": TOKEN, "Origin": "http://localhost:8810"})
     assert r.status_code == 200 and adopted.current(config, "standard")["variant"] == "reversal_5d/p8/dv5m"
     bad = c.post("/api/lab/adopt", json={**body, "reason": ""}, headers={"X-Desk-Token": TOKEN})
     assert bad.status_code == 400 and "say why" in bad.json()["error"]
@@ -136,7 +138,7 @@ def test_only_loopback_host_names_are_answered(config):
     # The real app allows 127.0.0.1 and localhost only: another name (DNS rebinding) is refused.
     c = TestClient(create_app(config, token=TOKEN))
     assert c.get("/api/lab").status_code == 400
-    ok = TestClient(create_app(config, token=TOKEN), base_url="http://127.0.0.1:8765")
+    ok = TestClient(create_app(config, token=TOKEN), base_url="http://127.0.0.1:8810")
     assert ok.get("/api/lab").status_code == 200
 
 
@@ -201,3 +203,20 @@ def test_the_cli_says_the_next_screen_uses_an_adoption(config, monkeypatch):
     assert "adopt a /topN variant" in run("momentum", "excess_12m/p8/dv5m")
     rows = [json.loads(x) for x in (adopted.lab_dir(config) / "adopted.jsonl").read_text().splitlines()]
     assert [r["strategy"] for r in rows] == ["momentum", "standard"]
+
+
+@pytest.mark.unit
+def test_the_v1_page_sends_money_only_from_the_mac_itself(config):
+    broker = FakeBroker()
+    p = _plan(config, broker, [("AAA", 1.0)], day="2030-01-07")
+    h = {"X-Desk-Token": TOKEN}
+    ts = _client(config, broker_factory=lambda cfg: broker, base_url="http://mac.tail.ts.net",
+                 allowed_hosts=("localhost", "127.0.0.1", "mac.tail.ts.net"))
+    for action, body in (("submit", {"plan_id": p.id}), ("resume", {}), ("ack", {})):
+        r = ts.post(f"/api/trade/{action}", json=body, headers=h)
+        assert r.status_code == 403 and "passkey" in r.json()["error"], action
+    proxied = _client(config, broker_factory=lambda cfg: broker)
+    r = proxied.post("/api/trade/submit", json={"plan_id": p.id},
+                     headers={**h, "Tailscale-User-Login": "me@example.com"})
+    assert r.status_code == 403 and not broker.orders_
+    assert ts.post("/api/trade/halt", json={}, headers=h).status_code == 200  # halting is never gated

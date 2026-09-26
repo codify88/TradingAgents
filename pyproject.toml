@@ -44,10 +44,12 @@ bedrock = [
 mcp = [
     "mcp>=2.2",
 ]
-# Desk, the operator's local web UI (tradingagents desk).
+# Desk, the operator's web UI (tradingagents desk): the API, and passkeys for
+# money actions. Current releases only (checked 2026-09-26; docs/design/desk.md).
 desk = [
-    "starlette>=0.40",
-    "uvicorn>=0.30",
+    "fastapi>=0.141",
+    "uvicorn>=0.54",
+    "webauthn>=3.0",
 ]
 
 [project.scripts]

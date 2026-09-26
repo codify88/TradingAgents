@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Desk, kept alive: the operator's web UI on http://localhost:8810, for this
+     Mac and -- through `tailscale serve` -- the operator's phone. It listens on
+     loopback only; Tailscale reaches it as a local proxy, never directly.
+     Installed by scripts/install-platform.sh. __REPO__ and __HOME__ are filled
+     in at install. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jeremysmith.tradingagents.desk</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/tradingagents</string>
+        <string>desk</string>
+        <string>--port</string>
+        <string>8810</string>
+        <string>--no-open</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.tradingagents/logs/desk.out</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.tradingagents/logs/desk.err</string>
+</dict>
+</plist>

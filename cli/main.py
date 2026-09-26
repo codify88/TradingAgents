@@ -1943,18 +1943,34 @@ def suggest_command():
     console.print(render_suggestions(DEFAULT_CONFIG))
 
 
-@app.command(name="desk")
+desk_app = typer.Typer(help="Desk: the operator's web UI.", invoke_without_command=True)
+app.add_typer(desk_app, name="desk")
+
+
+@desk_app.callback()
 def desk_command(
-    port: int = typer.Option(8765, "--port", help="Local port (the server listens on 127.0.0.1 only)."),
+    ctx: typer.Context,
+    port: int = typer.Option(8810, "--port", help="Local port (the server listens on 127.0.0.1 only)."),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open Desk in the browser."),
 ):
-    """Desk: the operator's local web UI -- lab adoption, paper trading, the night's results."""
+    """Serve Desk -- today's decisions, paper trading, the lab -- at http://localhost:PORT."""
+    if ctx.invoked_subcommand is not None:
+        return
     try:
         from tradingagents.desk.app import serve
     except ImportError as exc:
         console.print(f"[red]Desk needs its extra: pip install -e '.[desk]' ({exc}).[/red]")
         raise typer.Exit(code=1) from None
     serve(DEFAULT_CONFIG, port=port, open_browser=open_browser)
+
+
+@desk_app.command(name="code")
+def desk_code():
+    """A one-time code (15 minutes) to enrol a passkey in Desk on a new device or address."""
+    from tradingagents.desk.passkeys import Passkeys
+
+    code = Passkeys(DEFAULT_CONFIG).new_code()
+    console.print(f"Enrolment code: [bold]{code[:4]}-{code[4:]}[/bold]  (one use, 15 minutes)")
 
 
 trade_app = typer.Typer(help="Paper execution for the standard strategy: plans, approval, halt, reconcile.")
