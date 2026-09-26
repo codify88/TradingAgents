@@ -1367,7 +1367,7 @@ def screen(
         None, "--date", help="As-of date, YYYY-MM-DD. Defaults to today."
     ),
     picks: int = typer.Option(
-        None, "--picks", help="How many names to shortlist (8; standard: the adopted variant's)."),
+        None, "--picks", help="How many names to shortlist (the adopted variant's, else 8)."),
     ordering: str = typer.Option(
         None, "--ordering",
         help="Standard only: a screen-lab signal to rank by instead of the adopted one.",
@@ -1411,10 +1411,14 @@ def screen(
     if mandate.lower() in ("none", "standard"):
         mandate = ""
     if picks is None:
-        from tradingagents.lab.adopted import current
+        from tradingagents.lab.adopted import current, mandate_ordering
 
-        adopted = current(DEFAULT_CONFIG, "standard") if not mandate else None
-        picks = int(adopted["picks"]) if adopted and not ordering else 8
+        if mandate:
+            m_adopted = mandate_ordering(DEFAULT_CONFIG, mandate)
+            picks = m_adopted.picks if m_adopted else 8
+        else:
+            adopted = current(DEFAULT_CONFIG, "standard")
+            picks = int(adopted["picks"]) if adopted and not ordering else 8
     console.print(f"[cyan]Screening for {mandate or 'the standard strategy'} as of {as_of}…[/cyan]")
     try:
         result = run_screen(

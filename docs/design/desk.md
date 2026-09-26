@@ -49,10 +49,14 @@ Desk shows the difference before you confirm. Adopting against the verdict is
 allowed, because the bar is deliberately conservative, but it is labelled as
 your call, and it needs a reason.
 
-**Only the standard screen reads adoptions today** (`adopted.READ_LIVE`).
-Adopting for momentum or value is recorded with its evidence, and Desk and the
-CLI both say "recorded only". Wiring those two screens to read their adoption is
-lab work still to do (see "Next").
+**All three live screens read their adoption.** Standard takes the signal and
+floor. Momentum and value take the whole variant: the liquidity budget
+(`/topN`, so only budgeted variants can be adopted for them), the floor, the
+ordering (value measures through `lab.fundamentals`, price signals through
+`lab.live`, the lab's own code), the pick count, and for value the quality
+switch (`/noq` turns the quality exclusions off; a name that cannot be judged
+at all is still excluded). With nothing adopted, a screen runs exactly as
+before. The manifest's ordering line and notes say which adoption was used.
 
 ## Guards
 
@@ -75,11 +79,8 @@ This page can send orders, so:
 
 ## Next
 
-1. Wire the momentum and value live screens to read their adoption (one
-   `Ordering` per strategy, as `standard_ordering` does), then add them to
-   `READ_LIVE`.
-2. Lab runs from Desk: start `lab run` as a detached job through `ops.jobs`,
+1. Lab runs from Desk: start `lab run` as a detached job through `ops.jobs`,
    with the same night-window and busy guards.
-3. Charts where they earn their place: the ladder per strategy over time, and
+2. Charts where they earn their place: the ladder per strategy over time, and
    cohort P&L against SPY.
-4. Build a plan from Desk (`trade plan`); for now the nightly run builds it.
+3. Build a plan from Desk (`trade plan`); for now the nightly run builds it.

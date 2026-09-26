@@ -24,7 +24,10 @@ from .replay import SIGNALS, STRATEGIES, Variant, variants
 DEFAULT_STANDARD = Variant("liquidity", 8, 5e6)
 
 # Strategies whose live screen reads the adopted variant (screener/screen.py).
-READ_LIVE = ("standard",)
+READ_LIVE = ("standard", "momentum", "value")
+# Their screens examine a liquidity budget of names before ranking, so an
+# adoptable variant must say how big (a /topN variant).
+BUDGETED = ("momentum", "value")
 
 
 @dataclass
@@ -43,6 +46,8 @@ def _path(config: dict):
 
 
 def adoptions(config: dict) -> list[dict]:
+    if not config.get("data_cache_dir"):
+        return []  # no lab directory configured: nothing can have been adopted
     try:
         return [json.loads(x) for x in _path(config).read_text().splitlines() if x.strip()]
     except OSError:
@@ -64,9 +69,13 @@ def adopt(config: dict, strategy: str, variant_id: str, reason: str = "",
     v = match[0]
     if v.signal == "random":
         raise ValueError("the random ordering is the lab's null, not a screen")
+    if strategy in BUDGETED and not v.pool:
+        raise ValueError(f"the live {strategy} screen ranks within a liquidity budget; "
+                         f"adopt a /topN variant, not {v.id}")
     row = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "strategy": strategy,
            "variant": v.id, "signal": v.signal, "picks": v.picks,
-           "min_dollar_volume": v.min_dollar_volume, "reason": reason,
+           "min_dollar_volume": v.min_dollar_volume, "pool": v.pool, "quality": v.quality,
+           "reason": reason,
            "evidence": evidence if evidence is not None else evidence_for(config, strategy, v.id)}
     with _path(config).open("a") as fh:
         fh.write(json.dumps(row) + "\n")
@@ -97,3 +106,44 @@ def standard_ordering(config: dict, requested: str | None = None) -> Ordering:
         return Ordering(row["signal"], float(row["min_dollar_volume"]), f"adopted {row['at'][:10]}")
     return Ordering(DEFAULT_STANDARD.signal, DEFAULT_STANDARD.min_dollar_volume,
                     "default: nothing adopted from the lab yet")
+
+
+@dataclass
+class MandateOrdering:
+    """An adopted variant as the value or momentum screen applies it."""
+
+    strategy: str
+    variant: str
+    signal: str
+    picks: int
+    pool: int
+    min_dollar_volume: float
+    quality: bool
+    source: str
+
+    @property
+    def describe(self) -> str:
+        parts = [f"{self.signal} -- {SIGNALS[self.signal]}",
+                 f"ranked within the {self.pool} most liquid names",
+                 f"liquidity floor ${self.min_dollar_volume:,.0f}"]
+        if not self.quality:
+            parts.append("quality exclusions off")
+        return "; ".join(parts) + f" ({self.variant}, {self.source})"
+
+
+def strategy_key(mandate_name: str) -> str | None:
+    return next((k for k, s in STRATEGIES.items() if s.name == mandate_name), None)
+
+
+def mandate_ordering(config: dict, mandate_name: str) -> MandateOrdering | None:
+    """The adoption in force for a mandate's screen, or None: the screen then runs
+    exactly as it did before adoptions existed."""
+    key = strategy_key(mandate_name)
+    row = current(config, key) if key in BUDGETED else None
+    if not row:
+        return None
+    v = next((x for x in variants(STRATEGIES[key]) if x.id == row["variant"]), None)
+    if v is None or not v.pool:
+        return None  # a variant the lab no longer defines is not applied silently
+    return MandateOrdering(key, v.id, v.signal, v.picks, v.pool, v.min_dollar_volume, v.quality,
+                           f"adopted {row['at'][:10]}")

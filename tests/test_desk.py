@@ -81,7 +81,7 @@ def test_an_adoption_records_its_evidence_and_whether_it_was_the_lab_pick(config
 def test_the_lab_view_says_what_is_live_and_which_screens_read_adoptions(config):
     _lab_run(config)
     lab = views.lab(config)["strategies"]
-    assert lab["standard"]["reads_live"] is True and lab["momentum"]["reads_live"] is False
+    assert all(lab[k]["reads_live"] for k in ("standard", "momentum", "value"))
     assert lab["standard"]["default"] == "liquidity/p8/dv5m" and lab["standard"]["current"] is None
     views.adopt(config, "standard", "reversal_5d/p8/dv5m", "  why  ")
     lab = views.lab(config)["strategies"]
@@ -185,7 +185,7 @@ def test_a_plan_id_is_a_name_not_a_path(config):
 
 
 @pytest.mark.unit
-def test_the_cli_says_when_an_adoption_is_recorded_only(config, monkeypatch):
+def test_the_cli_says_the_next_screen_uses_an_adoption(config, monkeypatch):
     from typer.testing import CliRunner
 
     import cli.main as cm
@@ -196,7 +196,8 @@ def test_the_cli_says_when_an_adoption_is_recorded_only(config, monkeypatch):
     def run(*args):  # Rich wraps at the terminal width
         return " ".join(runner.invoke(cm.app, ["lab", "adopt", *args]).output.split())
 
-    assert "does not read adoptions yet" in run("momentum", "excess_12m/p8/dv5m/top60")
+    assert "the next screen uses it" in run("momentum", "excess_12m/p8/dv5m/top60")
     assert "the next screen uses it" in run("standard", "reversal_5d/p8/dv5m")
+    assert "adopt a /topN variant" in run("momentum", "excess_12m/p8/dv5m")
     rows = [json.loads(x) for x in (adopted.lab_dir(config) / "adopted.jsonl").read_text().splitlines()]
     assert [r["strategy"] for r in rows] == ["momentum", "standard"]

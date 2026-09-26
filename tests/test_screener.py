@@ -910,3 +910,54 @@ class TestStandardScreen:
         assert result.manifest.pick_symbols[0] == "S09"
         with pytest.raises(ValueError):
             adopt(config, "standard", "random/p8/dv5m")
+
+
+class TestAdoptedMandateScreens:
+    """An adoption from the lab changes the value or momentum screen's budget,
+    ordering and quality switch; without one the screen runs as before."""
+
+    def _setup(self, monkeypatch, tmp_path, tripped=()):
+        symbols = [f"S{i:02d}" for i in range(12)]
+        frames = {}
+        for k, s in enumerate(symbols):
+            f = _frame(n=300, price=50.0, step=0.05 + k / 1000)  # in an uptrend, as momentum requires
+            f["Volume"] = 1e6 * (k + 1)                            # S11 most liquid
+            frames[s] = f
+        frames["SPY"] = _frame()
+        monkeypatch.setattr(screen, "load_universe", lambda as_of, limit=None: [
+            universe.Candidate(s, s, "NYSE", "2010-01-01") for s in symbols])
+        monkeypatch.setattr(screen.prices, "download_av", lambda syms, start, end, **kw: prices.PriceData(
+            frames={s: frames[s] for s in syms if s in frames}))
+        monkeypatch.setattr(screen, "fundamental_exclusions", lambda m, sym, as_of, frame, limiter=None: (
+            ["Returns on capital structurally poor or deteriorating"] if sym in tripped else [], 0.5))
+        return {"results_dir": str(tmp_path), "data_cache_dir": str(tmp_path)}
+
+    def _run(self, config, mandate="equity_momentum", **kw):
+        return screen.run_screen(mandate, "2026-09-17", config, picks=3, controls=2,
+                                 requests_per_minute=100_000, control_seed=1, **kw).manifest
+
+    def test_momentum_uses_the_adopted_signal_and_budget(self, monkeypatch, tmp_path):
+        from tradingagents.lab.adopted import adopt
+
+        config = self._setup(monkeypatch, tmp_path)
+        before = self._run(config, fundamental_budget=60)
+        assert "Adopted" not in " ".join(before.notes)
+        adopt(config, "momentum", "momentum_12_1/p8/dv5m/top60", "test")
+        m = self._run(config)
+        assert "momentum_12_1" in m.ordering_signal and any("Adopted" in n for n in m.notes)
+        # The steepest 12-month climb ranks first; the budget is the variant's 60.
+        assert m.pick_symbols == ["S11", "S10", "S09"]
+
+    def test_value_without_quality_keeps_names_the_exclusions_would_drop(self, monkeypatch, tmp_path):
+        from tradingagents.lab import fundamentals as fu
+        from tradingagents.lab.adopted import adopt
+
+        config = self._setup(monkeypatch, tmp_path, tripped={"S11", "S10"})
+        monkeypatch.setattr(fu, "compute", lambda s, d: fu.Facts(values={"ey_pct": int(s[1:]) / 100}))
+        adopt(config, "value", "ey_pct/p8/dv5m/top60", "with quality")
+        with_q = self._run(config, "equity_value")
+        assert with_q.pick_symbols == ["S09", "S08", "S07"]
+        adopt(config, "value", "ey_pct/p8/dv5m/top60/noq", "without")
+        no_q = self._run(config, "equity_value")
+        assert no_q.pick_symbols == ["S11", "S10", "S09"]
+        assert "quality exclusions off" in no_q.ordering_signal

@@ -274,11 +274,19 @@ def _run_screen(
     universe_limit, control_seed, requests_per_minute, ordering=None,
 ) -> ScreenResult:
     mandate = get_mandate(mandate_name)
-    standard = None
+    standard = adopted = None
     if mandate is None:
         from tradingagents.lab.adopted import standard_ordering
 
         standard = standard_ordering(config, ordering)
+    else:
+        from tradingagents.lab.adopted import mandate_ordering
+
+        # The variant adopted from the lab, if any: its budget, floor, quality
+        # switch and ordering replace the defaults. None leaves the screen as it was.
+        adopted = mandate_ordering(config, mandate.name)
+        if adopted is not None:
+            fundamental_budget = adopted.pool
     as_of_ts = pd.Timestamp(as_of)
     start = (as_of_ts - pd.Timedelta(days=int(365 * 1.6))).strftime("%Y-%m-%d")
     end = (as_of_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
@@ -334,6 +342,15 @@ def _run_screen(
     # The cut into the expensive tier is by liquidity, which is neutral to both
     # mandates: ordering here on a mandate's own signal would apply it twice.
     survivors.sort(key=lambda s: prices.dollar_volume(frames[s]), reverse=True)
+    if adopted is not None and adopted.min_dollar_volume > MIN_DOLLAR_VOLUME:
+        floor = adopted.min_dollar_volume
+        reason = f"median dollar volume below the adopted ${floor:,.0f}"
+        thin = [s for s in survivors if prices.dollar_volume(frames[s]) < floor]
+        for symbol in thin:
+            excluded[symbol] = [reason]
+        if thin:
+            tiers.append(TierStat("adopted floor", len(survivors), len(survivors) - len(thin), {reason: len(thin)}))
+        survivors = [s for s in survivors if s not in set(thin)]
     examined = survivors[:fundamental_budget]
     if len(survivors) > len(examined):
         tiers.append(TierStat(
@@ -354,9 +371,14 @@ def _run_screen(
             # keeping no statements once a company delists.
             rules = [DELISTED_NO_STATEMENTS]
             lost_to_statements.append(symbol)
+        if rules and adopted is not None and not adopted.quality and not _unjudgeable(rules[0]):
+            rules = []  # the adopted variant runs without the quality exclusions
         if rules:
             excluded[symbol] = rules
             reasons[rules[0]] += 1
+            continue
+        if adopted is not None:
+            eligible.append(symbol)  # ordered below, by the adopted signal
             continue
         value = (
             value if mandate and mandate.name == "equity_value"
@@ -371,6 +393,12 @@ def _run_screen(
             continue
         eligible.append(symbol)
         ordering[symbol] = value
+    if adopted is not None:
+        ordering, unplaced = _adopted_values(adopted, eligible, frames, as_of)
+        for symbol in unplaced:
+            excluded[symbol] = [NO_ORDERING_VALUE]
+            reasons[NO_ORDERING_VALUE] += 1
+        eligible = [s for s in eligible if s in ordering]
     tiers.append(TierStat("fundamental", len(examined), len(eligible), dict(reasons)))
 
     # --- ordering, then a control drawn from what the ordering rejected ---
@@ -402,6 +430,9 @@ def _run_screen(
 
     signal = VALUE_ORDERING if (mandate and mandate.name == "equity_value") else MOMENTUM_ORDERING
     notes = []
+    if adopted is not None:
+        signal = adopted.describe
+        notes.append(f"Adopted from the lab: {adopted.describe}.")
     if delisted:
         notes.append(survivorship_note(delisted, survivors, examined, lost_to_statements, eligible))
 
@@ -449,6 +480,33 @@ def _run_screen(
     return ScreenResult(
         manifest=manifest, eligible=eligible, excluded=excluded, usable=usable,
     )
+
+
+def _unjudgeable(rule: str) -> bool:
+    """A rule that says the name could not be judged at all -- kept even with the
+    quality exclusions off, as the lab's /noq variants keep it."""
+    return rule.startswith(("fundamentals unavailable", "screens could not", "value ordering unavailable",
+                            "delisted since"))
+
+
+def _adopted_values(adopted, symbols: list[str], frames: dict, as_of: str) -> tuple[dict[str, float], list[str]]:
+    """The adopted signal for each eligible name, by the lab's own code: value
+    measures from ``lab.fundamentals``, price signals from ``lab.live``."""
+    from tradingagents.lab.fundamentals import MEASURES, compute
+
+    if adopted.signal in MEASURES:
+        values, unplaced = {}, []
+        for s in symbols:
+            f = compute(s, as_of)
+            v = f.values.get(adopted.signal, float("nan")) if not f.error else float("nan")
+            if math.isnan(v):
+                unplaced.append(s)
+            else:
+                values[s] = v
+        return values, unplaced
+    from tradingagents.lab.live import rank
+
+    return rank(adopted.signal, {s: frames[s] for s in symbols}, as_of)
 
 
 def _finish_standard(standard, mandate_name, as_of, universe, frames, survivors, tiers,
