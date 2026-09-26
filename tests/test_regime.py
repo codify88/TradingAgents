@@ -112,3 +112,64 @@ def test_saved_state_is_what_desk_and_today_read(tmp_path):
     market = today._market(config)
     assert market["long"]["for"] == ["momentum", "value"] and "short" not in market
     assert today._market({"data_cache_dir": str(tmp_path / "none")}) is None
+
+
+# --- market-state variants in the lab ------------------------------------------------
+
+
+def _ctx(days=520):
+    from tests.test_lab import _panel as lab_panel, _unis
+    from tradingagents.lab import replay as rp
+
+    p = lab_panel(days=days)
+    return rp, rp.Context(p, _unis(p))
+
+
+@pytest.mark.unit
+def test_market_state_variants_are_named_not_a_grid_and_cannot_be_adopted(tmp_path):
+    from tradingagents.lab import adopted, replay as rp
+
+    std = [v.id for v in rp.variants(rp.STRATEGIES["standard"])]
+    assert len(std) == 34 and sum("/if_" in v for v in std) == 2
+    assert "liquidity/p8/dv5m/if_stressed:reversal_5d" in std
+    assert "excess_12m/p8/dv5m/top60/if_long_down:cash" in [v.id for v in rp.variants(rp.STRATEGIES["momentum"])]
+    assert len(rp.variants(rp.STRATEGIES["value"])) == 48
+    with pytest.raises(ValueError, match="market's state"):
+        adopted.adopt({"data_cache_dir": str(tmp_path)}, "standard", "liquidity/p8/dv5m/if_stressed:reversal_5d")
+
+
+@pytest.mark.unit
+def test_a_variant_switches_only_on_the_dates_its_condition_held(monkeypatch):
+    rp, ctx = _ctx()
+    spec = rp.Strategy("t", 5, "SPY", "week", ("liquidity",), picks=(8,), min_dollar_volume=(5e6,))
+    dates = ctx.schedule("week", "2015-01-01")
+    on = set(dates[::3])
+    monkeypatch.setattr(ctx, "holds", lambda condition, i: i in on)
+    base = rp.replay(ctx, spec, rp.Variant("liquidity", 8, 0.0), dates)
+    alt = rp.replay(ctx, spec, rp.Variant("momentum_21d", 8, 0.0), dates)
+    mixed = rp.replay(ctx, spec, rp.Variant("liquidity", 8, 0.0, when="stressed:momentum_21d"), dates)
+    assert mixed and len(base) == len(alt) == len(mixed)
+    for b, a, m in zip(base, alt, mixed, strict=True):
+        i = ctx.dates.get_loc(pd.Timestamp(m.date))
+        assert m.chosen == (a.chosen if i in on else b.chosen)
+
+
+@pytest.mark.unit
+def test_cash_earns_nothing_and_keeps_the_whole_pool(monkeypatch):
+    rp, ctx = _ctx()
+    spec = rp.Strategy("t", 5, "SPY", "week", ("liquidity",), picks=(8,), min_dollar_volume=(5e6,))
+    dates = ctx.schedule("week", "2015-01-01")
+    monkeypatch.setattr(ctx, "holds", lambda condition, i: True)
+    rows = rp.replay(ctx, spec, rp.Variant("liquidity", 8, 0.0, when="long_down:cash"), dates)
+    assert rows and all(r.picks == 0.0 and r.chosen == [] for r in rows)
+    assert all(r.selection == -r.pool for r in rows)
+
+
+@pytest.mark.unit
+def test_the_condition_reads_the_state_at_the_dates_close():
+    rp, ctx = _ctx()
+    states = rg.compute(ctx._panel, "long").reindex(ctx.dates)
+    for i in (300, 400, 500):
+        assert ctx.holds("long_down", i) == (states["trend"].iloc[i] == "down")
+        assert ctx.holds("stressed", i) == bool(states["stressed"].iloc[i])
+    assert ctx.holds("stressed", 10) is False  # windows not filled yet

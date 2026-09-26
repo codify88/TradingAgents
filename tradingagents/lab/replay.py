@@ -64,6 +64,9 @@ class Strategy:
     qualities: tuple[bool, ...] = (True,)  # with / without the quality exclusions
     split: str = "2020-01-01"              # tune before, test from
     read_horizons: tuple[int, ...] = ()    # shorter holds reported beside the verdict
+    # Market-state variants, named one by one before they are run (never a grid):
+    # each one tried is a trial, and a grid would raise the bar for everything.
+    extras: tuple = ()
 
 
 STRATEGIES = {
@@ -71,13 +74,18 @@ STRATEGIES = {
         "standard", 5, "SPY", "week",
         ("liquidity", "random", "reversal_5d", "reversal_21d", "momentum_21d",
          "momentum_12_1", "low_vol_63", "high_52w"),
-        note="The no-mandate strategy's candidate screen: price-only by design."),
+        note="The no-mandate strategy's candidate screen: price-only by design. The if_ variants "
+             "switch ordering by the market's state (lab/regime.py), named before they were run.",
+        extras=(("liquidity", 8, 5e6, None, True, "stressed:reversal_5d"),
+                ("liquidity", 8, 5e6, None, True, "short_range:reversal_5d"))),
     "momentum": Strategy(
         "equity_momentum", 126, "MTUM", "month",
         ("excess_12m", "momentum_12_1", "high_52w", "low_vol_63", "random", "liquidity"),
         pools=(None, 60),
         note="Price tier and ordering only: the live screen's trend and growth exclusions are not "
-             "replayed yet. Pool 60 ranks within the 60 most liquid names, as the live screen does."),
+             "replayed yet. Pool 60 ranks within the 60 most liquid names, as the live screen does. "
+             "The if_ variant holds cash while the long view's trend is down.",
+        extras=(("excess_12m", 8, 5e6, 60, True, "long_down:cash"),)),
     "value": Strategy(
         "equity_value", 756, "IWD", "month",
         ("fcf_pct", "fcf_yield", "ey_pct", "ebit_pct", "liquidity", "random"),
@@ -97,16 +105,30 @@ class Variant:
     min_dollar_volume: float
     pool: int | None = None
     quality: bool = True
+    # "<condition>:<signal or cash>": while the market-state condition holds on the
+    # date, rank by that signal instead (or hold cash). See CONDITIONS.
+    when: str | None = None
 
     @property
     def id(self) -> str:
         base = f"{self.signal}/p{self.picks}/dv{self.min_dollar_volume / 1e6:g}m"
-        return base + (f"/top{self.pool}" if self.pool else "") + ("" if self.quality else "/noq")
+        return (base + (f"/top{self.pool}" if self.pool else "") + ("" if self.quality else "/noq")
+                + (f"/if_{self.when}" if self.when else ""))
 
 
 def variants(strategy: Strategy) -> list[Variant]:
-    return [Variant(s, p, dv, pool, q) for s in strategy.signals for p in strategy.picks
+    grid = [Variant(s, p, dv, pool, q) for s in strategy.signals for p in strategy.picks
             for dv in strategy.min_dollar_volume for pool in strategy.pools for q in strategy.qualities]
+    return grid + [Variant(*x) for x in strategy.extras]
+
+
+# Market-state conditions a variant can switch on: (view, test on that day's state).
+# Labels come from closes up to the date; the trade is at the next open.
+CONDITIONS = {
+    "stressed": ("long", lambda r: bool(r["stressed"])),       # SPY downtrend or volatility > 20%
+    "short_range": ("short", lambda r: r["shape"] == "range"),  # the short view's shape is a range
+    "long_down": ("long", lambda r: r["trend"] == "down"),      # the long view's trend is down
+}
 
 
 # --- the context: arrays, schedule, universes ---------------------------------------
@@ -129,7 +151,20 @@ class Context:
                                      dtype=int)
                          for d, syms in universes.items()}
         self._cache: dict[tuple, np.ndarray] = {}
+        self._panel = panel
+        self._states: dict[str, pd.DataFrame] = {}
         self.facts: dict[str, dict] = {}  # date -> {symbol: lab.fundamentals.Facts}, for value replays
+
+    def holds(self, condition: str, i: int) -> bool:
+        """Whether a market-state condition held at row ``i``'s close (False before
+        the view's windows have filled)."""
+        view, test = CONDITIONS[condition]
+        if view not in self._states:
+            from .regime import compute
+
+            self._states[view] = compute(self._panel, view).reindex(self.dates)
+        row = self._states[view].iloc[i]
+        return isinstance(row["shape"], str) and test(row)
 
     def set_facts(self, facts: dict) -> None:
         """``{(symbol, date): Facts}`` as the fundamentals cache keeps them."""
@@ -300,13 +335,20 @@ def replay(ctx: Context, strategy: Strategy, variant: Variant, dates: list[int],
             continue
         if strategy.fundamentals:
             cols = _judged(ctx, i, cols, variant.quality)
-        score = _signal(ctx, variant.signal, i, seed)[cols] if cols.size else cols.astype(float)
+        signal, cash = variant.signal, False
+        if variant.when:
+            condition, alt = variant.when.split(":")
+            if ctx.holds(condition, i):
+                signal, cash = (variant.signal, True) if alt == "cash" else (alt, False)
+        score = _signal(ctx, signal, i, seed)[cols] if cols.size else cols.astype(float)
         keep = ~np.isnan(score)
         cols, score = cols[keep], score[keep]
         if cols.size <= variant.picks:
             continue
         order = np.argsort(-score, kind="stable")
         chosen, pool = cols[order[:variant.picks]], cols[order[variant.picks:]]
+        if cash:  # sitting out: the picks earn nothing, and the whole eligible set is the pool
+            chosen, pool = chosen[:0], cols
         fwd_p, fwd_c = ctx.forward(i, horizon, chosen), ctx.forward(i, horizon, pool)
 
         def one(sym: str, i: int = i) -> float:
@@ -315,7 +357,7 @@ def replay(ctx: Context, strategy: Strategy, variant: Variant, dates: list[int],
 
         out.append(Row(
             date=ctx.dates[i].strftime("%Y-%m-%d"), eligible=int(cols.size),
-            picks=_nanmean(fwd_p), pool=_nanmean(fwd_c),
+            picks=0.0 if cash else _nanmean(fwd_p), pool=_nanmean(fwd_c),
             market=one("SPY"), equal=one("RSP"), style=one(strategy.style),
             chosen=[str(s) for s in ctx.symbols[chosen]]))
     return out

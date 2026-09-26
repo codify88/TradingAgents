@@ -69,6 +69,9 @@ def adopt(config: dict, strategy: str, variant_id: str, reason: str = "",
     v = match[0]
     if v.signal == "random":
         raise ValueError("the random ordering is the lab's null, not a screen")
+    if v.when:
+        raise ValueError("the live screens do not read the market's state yet, so a market-state "
+                         "variant cannot be adopted")
     if strategy in BUDGETED and not v.pool:
         raise ValueError(f"the live {strategy} screen ranks within a liquidity budget; "
                          f"adopt a /topN variant, not {v.id}")
