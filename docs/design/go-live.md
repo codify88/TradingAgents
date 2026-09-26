@@ -61,6 +61,39 @@ daily histories, delisted names included; tuned before 2020, tested from 2020.
   receivables growth alone with cash conversion at 1.55x. A mandate decision:
   proposed next is to test relative versions of both rules as lab variants.
 
+## The market's state (2026-09-26)
+
+`lab regime` labels every day from trailing windows of SPY's closes: the trend
+(up, mixed, down) and the path's shape (breakout, channel, range, unclear). There
+are two views:
+
+- **long:** a 200-day trend and a 60-day shape, for value and momentum;
+- **short:** a 50-day trend and a 15-day shape, for standard.
+
+Desk's Today shows both, and the nightly refreshes them. Labels turn late: from
+the February 2020 top, the long view called a breakout down about 12% lower.
+
+Three variants that switch by the market's state were named before they ran:
+
+| Variant | Tuning (to 2019) | Test (2020 on) |
+|---|---|---|
+| standard: liquidity, 8 names (base) | +0.25%/wk, t 2.90 | +0.45%/wk, t 2.24 |
+| standard: last week's losers when stressed | +0.23%/wk, t 2.19 | +0.88%/wk, t 2.95; net of costs vs the S&P 500 +0.74%/wk, t 2.48 |
+| standard: last week's losers when the short view is a range | +0.09%/wk, t 0.77 | +0.62%/wk, t 1.96 |
+| momentum: cash in a long downtrend | +3.9%, t 2.49 | +6.7%, t 1.34 (the base: +9.9%, t 1.59) |
+
+None clears the bar (standard 34 trials, momentum 49).
+
+**"Losers when stressed" does not have clean evidence.** Its test-period
+strength is what the ad hoc look that suggested it had already seen, so the
+test dates do not independently confirm it. Stressed weeks also cluster into
+about five episodes. Before 2020 it did slightly worse than liquidity alone.
+Only forward weeks can settle it. It could run as a shadow ordering beside the
+live screen, which would cost nothing and make no decisions.
+
+**Cash in downtrends costs momentum.** The rebounds it misses outweigh the
+falls it avoids.
+
 ## Two things to hold onto
 
 1. **Backtests of LLM judgement flatter it.** The models have read about the
