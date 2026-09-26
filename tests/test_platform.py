@@ -232,3 +232,12 @@ def test_the_desk_agent_serves_loopback_only_and_the_installer_manages_it():
     assert "0.0.0.0" not in text  # the server binds 127.0.0.1 itself; nothing here widens it
     installer = (REPO / "scripts" / "install-platform.sh").read_text()
     assert installer.count("$DESK_PLIST") >= 4  # defined, filled, loaded, and removed on --uninstall
+
+
+def test_the_nightly_refreshes_the_market_state_after_tonights_prices_and_never_fails_on_it():
+    text = (REPO / "scripts" / "nightly.sh").read_text()
+    standard_screen = text.index("screen --mandate none")
+    rebuild = text.index("lab prices --no-fetch")
+    labels = text.index("lab regime")
+    assert standard_screen < rebuild < labels < text.index("trade session-today")
+    assert "market state not refreshed" in text  # an || fallback, not an exit

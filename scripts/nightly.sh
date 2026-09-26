@@ -80,6 +80,15 @@ echo "--- step 3: standard screen (no model calls) [$(date +%H:%M:%S)] ---"
 "$TRADINGAGENTS" screen --mandate none --controls "$STANDARD_CONTROLS" < /dev/null \
     || echo "standard screen failed; no standard picks today."
 
+echo
+# The market's state (trend and shape) for Desk and the lab: the price panel
+# rebuilt from tonight's stored histories (no requests but a new month's
+# listing), then the labels. About 80 seconds; a failure costs only freshness.
+echo "--- market state: panel from stored prices, then the labels [$(date +%H:%M:%S)] ---"
+"$TRADINGAGENTS" lab prices --no-fetch < /dev/null \
+    && "$TRADINGAGENTS" lab regime --since "$(date -v-10d +%Y-%m-%d)" < /dev/null \
+    || echo "market state not refreshed; Desk shows the last one."
+
 if [ "$STANDARD_NAMES" -gt 0 ]; then
     echo
     # Only today's screen, and only when today has an open to trade it at: a
