@@ -62,6 +62,19 @@ def _reviews(within_days: int = 7) -> list[dict]:
         return []
 
 
+def _market(config: dict) -> dict | None:
+    """The latest market state per view (``lab regime``), or None if never computed."""
+    from tradingagents.lab import regime
+
+    try:
+        views = {name: regime.load(config, name) for name in regime.PROFILES}
+    except (OSError, ValueError, KeyError):
+        return None
+    out = {name: {**v["current"], "for": [k for k, p in regime.FOR_STRATEGY.items() if p == name]}
+           for name, v in views.items() if v}
+    return out or None
+
+
 def today(config: dict, now: datetime | None = None) -> dict:
     from tradingagents.lab.report import open_suggestions
     from tradingagents.trading.book import load_book
@@ -109,5 +122,6 @@ def today(config: dict, now: datetime | None = None) -> dict:
         "switches": {"halted": book.halted, "halted_reason": book.halted_reason,
                      "blocked": book.blocked, "refusal": book.refusal()},
         "night": night, "reviews": reviews, "suggestions": suggestions, "inbox": inbox,
+        "market": _market(config),
         "needs_you": sum(i["severity"] in ("critical", "action") for i in inbox),
     }

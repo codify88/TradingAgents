@@ -107,6 +107,12 @@ def create_app(config: dict, token: str | None = None, broker_factory=None,
     def today():
         return today_view.today(config)
 
+    @app.get("/api/v1/market")
+    def market():
+        from tradingagents.lab import regime
+
+        return {name: regime.load(config, name) for name in regime.PROFILES}
+
     @app.get("/api/v1/trading")
     def trading_v1():
         return views.trading(config, broker_factory)

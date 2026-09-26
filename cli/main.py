@@ -1922,6 +1922,33 @@ def lab_adopt(
                      "recorded, but this strategy's live screen does not read adoptions yet."))
 
 
+@lab_app.command(name="regime")
+def lab_regime(
+    episodes_since: str = typer.Option("2025-01-01", "--since", help="List the shape's runs from this date."),
+):
+    """The market's state from the price panel: trend and shape, a long and a short view."""
+    from tradingagents.lab import panel, regime as rg
+
+    p = panel.load_panel(DEFAULT_CONFIG)
+    if p is None:
+        console.print("[red]No price panel yet: run `tradingagents lab prices` first.[/red]")
+        raise typer.Exit(code=1)
+    for name, prof in rg.PROFILES.items():
+        states = rg.compute(p, prof)
+        rg.save(DEFAULT_CONFIG, name, states)
+        cur = rg.summary(states)
+        used = ", ".join(k for k, v in rg.FOR_STRATEGY.items() if v == name)
+        console.print(
+            f"\n[bold]{name}[/bold] view ({used}; {prof.trend_ma}-day trend, {prof.shape}-day shape) "
+            f"as of {cur['as_of']}: trend [bold]{cur['trend']}[/bold], shape [bold]{cur['shape']}[/bold] "
+            f"for {cur['days']} day(s); volatility {cur['vol']:.0%}, {cur['drawdown']:+.1%} from the "
+            f"1-year high, {cur['breadth']:.0%} of liquid names above their {prof.trend_ma}-day average"
+            + ("; [bold]stressed[/bold]" if cur["stressed"] else "") + ".")
+        runs = rg.episodes(states)
+        for r in runs[runs.end >= episodes_since].itertuples():
+            console.print(f"  {r.start.date()} .. {r.end.date()}  {r.label:<14} {r.days:>4}d  {r.move:+.1%}")
+
+
 @lab_app.command(name="show")
 def lab_show(strategy: str = typer.Option("standard", "--strategy")):
     """The last lab report for a strategy and what its live screen uses."""

@@ -62,6 +62,22 @@ export interface Today {
   suggestions: { strategy_key: string; candidate: string; reason: string; tradeable: boolean }[];
   inbox: InboxItem[];
   needs_you: number;
+  market: Record<"long" | "short", MarketState | undefined> | null;
+}
+
+/** One view of the market's state (tradingagents/lab/regime.py), from `lab regime`. */
+export interface MarketState {
+  as_of: string;
+  trend: "up" | "mixed" | "down";
+  shape: "breakout_up" | "channel_up" | "range" | "channel_down" | "breakout_down" | "unclear";
+  days: number;
+  er: number | null;
+  band: number | null;
+  vol: number | null;
+  drawdown: number | null;
+  breadth: number | null;
+  stressed: boolean;
+  for: string[];
 }
 
 export interface Cohort {

@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { passkeyMessage, withPasskey, type InboxItem, type OrderPlan, type Switches } from "../api";
+import { passkeyMessage, withPasskey, type InboxItem, type MarketState, type OrderPlan, type Switches, type Today } from "../api";
 import { cn } from "../cn";
 import { HoldButton } from "../components/HoldButton";
 import { useToast } from "../components/toast";
-import { Button, Card, Empty, ErrorNote, Pill } from "../components/ui";
+import { Button, Card, Empty, ErrorNote, Label, Pill } from "../components/ui";
 import { day, money, remaining, time } from "../format";
 import { useRefresh, useSession, useToday } from "../hooks";
 
@@ -203,6 +203,53 @@ function InboxRow({ item }: { item: InboxItem }) {
   return <Card>{body}</Card>;
 }
 
+const shapeText: Record<MarketState["shape"], string> = {
+  breakout_up: "Breakout up",
+  channel_up: "Up channel",
+  range: "Range",
+  channel_down: "Down channel",
+  breakout_down: "Breakout down",
+  unclear: "Unclear",
+};
+const trendTone = { up: "gain", mixed: "neutral", down: "loss" } as const;
+const pct = (x: number | null, signed = false) =>
+  x == null ? "—" : `${signed && x > 0 ? "+" : ""}${(x * 100).toFixed(signed ? 1 : 0)}%`;
+
+function MarketView({ name, m }: { name: string; m: MarketState }) {
+  return (
+    <div className="min-w-0 flex-1">
+      <Label>
+        {name} · {m.for.join(", ")}
+      </Label>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <Pill tone={trendTone[m.trend]}>{m.trend === "mixed" ? "trend mixed" : `${m.trend}trend`}</Pill>
+        <Pill tone={m.shape.startsWith("breakout") ? "accent" : "neutral"}>{shapeText[m.shape]}</Pill>
+        {m.stressed ? <Pill tone="warn">stressed</Pill> : null}
+      </div>
+      <div className="mt-1.5 text-[13px] text-muted">
+        {m.days} day{m.days === 1 ? "" : "s"} in this shape · vol {pct(m.vol)} · {pct(m.drawdown, true)} from high ·{" "}
+        breadth {pct(m.breadth)}
+      </div>
+    </div>
+  );
+}
+
+function MarketCard({ market }: { market: NonNullable<Today["market"]> }) {
+  const asOf = market.long?.as_of ?? market.short?.as_of;
+  return (
+    <Card>
+      <div className="flex items-baseline justify-between">
+        <div className="text-[15px] font-semibold">Market state</div>
+        {asOf ? <div className="text-[12px] text-faint">SPY close {day(asOf)}</div> : null}
+      </div>
+      <div className="mt-3 flex flex-col gap-4 sm:flex-row">
+        {market.long ? <MarketView name="Long view" m={market.long} /> : null}
+        {market.short ? <MarketView name="Short view" m={market.short} /> : null}
+      </div>
+    </Card>
+  );
+}
+
 export function TodayScreen() {
   const { data, error, isPending } = useToday();
   const now = new Date();
@@ -238,6 +285,7 @@ export function TodayScreen() {
             .map((i) => (
               <InboxRow key={`${i.kind}-${i.title}`} item={i} />
             ))}
+          {data.market ? <MarketCard market={data.market} /> : null}
           {data.inbox.length === 0 ? (
             <Empty title="Nothing needs you">No plan to approve, no mismatches, and last night ran cleanly.</Empty>
           ) : null}
