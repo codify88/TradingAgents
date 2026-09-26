@@ -82,10 +82,16 @@ echo "--- step 3: standard screen (no model calls) [$(date +%H:%M:%S)] ---"
 
 if [ "$STANDARD_NAMES" -gt 0 ]; then
     echo
-    # Only today's screen: a 5-day pick can be traded only the morning after.
-    echo "--- step 4: adjudicate at most $STANDARD_NAMES standard names [$(date +%H:%M:%S)] ---"
-    "$TRADINGAGENTS" nightly-queue --mandate none --max-names "$STANDARD_NAMES" \
-        --backlog "$STANDARD_NAMES" --fresh < /dev/null || true
+    # Only today's screen, and only when today has an open to trade it at: a
+    # 5-day pick is tradeable only the morning after it is screened, and a
+    # weekend or holiday night's picks never reach an open.
+    if "$TRADINGAGENTS" trade session-today < /dev/null; then
+        echo "--- step 4: adjudicate at most $STANDARD_NAMES standard names [$(date +%H:%M:%S)] ---"
+        "$TRADINGAGENTS" nightly-queue --mandate none --max-names "$STANDARD_NAMES" \
+            --backlog "$STANDARD_NAMES" --fresh < /dev/null || true
+    else
+        echo "--- step 4: skipped: no trading session today, so no standard decisions ---"
+    fi
 fi
 
 # Paper book, once the Alpaca keys are in .env: yesterday's fills are final by

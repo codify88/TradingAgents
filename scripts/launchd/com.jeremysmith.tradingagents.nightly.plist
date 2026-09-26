@@ -35,6 +35,11 @@
         <string>8</string>
         <key>NIGHTLY_CONTROLS</key>
         <string>4</string>
+        <!-- The standard strategy's agent decisions on today's screen, picks
+             first (decided 2026-09-25: 5). Skipped on nights without a
+             trading session. -->
+        <key>NIGHTLY_STANDARD_NAMES</key>
+        <string>5</string>
     </dict>
 
     <key>WorkingDirectory</key>

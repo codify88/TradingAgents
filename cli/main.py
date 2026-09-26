@@ -2005,6 +2005,26 @@ def trade_plan(
     console.print(pl.render(p))
 
 
+@trade_app.command(name="session-today")
+def trade_session_today():
+    """Exit 0 if today (New York) is a trading session, 1 if not -- for the nightly
+    script, so decisions whose picks could never be traded are not paid for."""
+    from datetime import datetime
+
+    from tradingagents.trading.broker import AlpacaBroker, BrokerError
+    from tradingagents.trading.plan import NEW_YORK
+
+    today = datetime.now(NEW_YORK).date()
+    try:
+        sessions = AlpacaBroker(DEFAULT_CONFIG).sessions(today.isoformat(), today.isoformat())
+        is_session, source = today.isoformat() in sessions, "the broker's calendar"
+    except BrokerError as exc:
+        # Without the broker, weekdays: a holiday costs one night's decisions, no more.
+        is_session, source = today.weekday() < 5, f"weekday fallback ({exc})"
+    console.print(f"{today}: {'a trading session' if is_session else 'no session'} ({source})")
+    raise typer.Exit(code=0 if is_session else 1)
+
+
 @trade_app.command(name="show")
 def trade_show(plan_id: str = typer.Argument(None, help="Default: the latest pending plan.")):
     """An order plan, as it would be sent."""
