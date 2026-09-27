@@ -43,7 +43,8 @@ export function RunsTab({ focus }: { focus: { variant?: string } }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!suite && ss.data?.suites.length) setSuite(ss.data.suites[0].name);
+    const ready = ss.data?.suites.filter((s) => s.status === "ready") ?? [];
+    if (!suite && ready.length) setSuite(ready[0].name);
   }, [ss.data, suite]);
 
   useEffect(() => {
@@ -91,8 +92,8 @@ export function RunsTab({ focus }: { focus: { variant?: string } }) {
             <label htmlFor="r-suite" className="text-[13px] text-muted">Suite</label>
             <select id="r-suite" className="mt-1 w-full rounded-xl border border-rule bg-ground px-3 py-2.5 text-[14px]" value={suite} onChange={(e) => setSuite(e.target.value)}>
               {ss.data?.suites.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.name} · {s.cases} cases
+                <option key={s.name} value={s.name} disabled={s.status !== "ready"}>
+                  {s.name} · {s.status === "ready" ? `${s.cases} cases` : `${s.status} ${s.done}/${s.total}`}
                 </option>
               ))}
             </select>

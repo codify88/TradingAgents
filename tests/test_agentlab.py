@@ -229,3 +229,41 @@ def test_desk_saves_previews_and_guards_the_spend(config, tmp_path, monkeypatch)
     assert c2.post("/api/v1/agents/runs", json={"variant": "pricey", "suite": "pilot", "over_cap": True,
                                                 "confirm_cost": big["cost_high"]}, headers=h).status_code == 200
     assert any(r["id"] == rid for r in c.get("/api/v1/agents/runs").json()["runs"])
+
+
+def test_a_suite_shows_while_it_builds_and_a_failed_build_says_why(config):
+    from types import SimpleNamespace
+
+    seen = []
+
+    def screen(mandate, day, cfg, picks, controls, control_seed):
+        s = next(x for x in suites.all_suites(config) if x.name == "wk")
+        seen.append((s.status, s.done, s.total))                      # visible, with progress, while building
+        from tradingagents.screener.manifest import ScreenManifest
+        m = ScreenManifest(run_id=f"{day}_none_{len(seen):06d}", mandate="", as_of=day, created="now",
+                           universe_size=10, tiers=[], ordering_signal="x",
+                           picks=[{"symbol": "AAA", "rank": 1, "value": 1.0}], controls=[{"symbol": "BBB", "value": 0}],
+                           control_seed=control_seed, eligible_count=2, notes=[])
+        return SimpleNamespace(manifest=m)
+
+    s = suites.build(config, "wk", ["2025-09-05", "2025-09-12"], screen=screen)
+    assert seen == [("building", 0, 2), ("building", 1, 2)] and s.status == "ready" and s.cases == 4
+    assert suites.exists(config, "wk")
+
+    def broken(*a, **k):
+        raise RuntimeError("vendor down")
+
+    with pytest.raises(RuntimeError):
+        suites.build(config, "bad", ["2025-09-05"], screen=broken)
+    bad = next(x for x in suites.all_suites(config) if x.name == "bad")
+    assert bad.status == "failed" and "vendor down" in bad.error
+    with pytest.raises(ValueError, match="failed"):
+        runs.estimate(config, va.Variant("x"), "bad")
+
+
+def test_lab_jobs_count_as_busy():
+    from tradingagents.ops import jobs
+
+    assert jobs._BUSY.search("/Users/me/.local/bin/tradingagents agents suite-build wk --start 2025-01-01")
+    assert jobs._BUSY.search("python /x/tradingagents agents execute flat-book--wk--20260926")
+    assert not jobs._BUSY.search("tradingagents agents catalog")

@@ -27,7 +27,7 @@ from pathlib import Path
 
 MAX_NAMES = 5
 NIGHT_START, NIGHT_END = time(1, 30), time(7, 30)
-_BUSY = re.compile(r"tradingagents (screen-run|nightly-queue|harvest)\b")
+_BUSY = re.compile(r"tradingagents (screen-run|nightly-queue|harvest|agents (suite-build|execute))\b")
 _TA = str(Path.home() / ".local" / "bin" / "tradingagents")
 
 

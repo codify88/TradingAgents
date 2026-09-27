@@ -79,6 +79,8 @@ def estimate(config: dict, variant: Variant, suite: str) -> dict:
     s = next((x for x in su.all_suites(config) if x.name == suite), None)
     if s is None:
         raise ValueError(f"no suite {suite!r}")
+    if s.status != "ready":
+        raise ValueError(f"suite {suite!r} is {s.status} ({s.done} of {s.total} dates); wait until it is ready")
     cfg = {**config, **variant.config_overrides()}
     models = sorted({cfg.get("deep_think_llm", ""), cfg.get("quick_think_llm", "")})
     ti, to = TOKENS_PER_DECISION

@@ -97,7 +97,8 @@ def register(app, config: dict, authorised, refused, body_of, jobs_start=None) -
 
     @app.get("/api/v1/agents/suites")
     def agents_suites():
-        return {"suites": [asdict(s) for s in suites.all_suites(config)], "cutoffs": suites.MODEL_CUTOFFS}
+        return {"suites": [asdict(s) for s in suites.all_suites(config)], "cutoffs": suites.MODEL_CUTOFFS,
+                "seconds_per_date": suites.SECONDS_PER_DATE}
 
     @app.post("/api/v1/agents/suites")
     async def agents_suite_build(request: Request):
@@ -113,8 +114,10 @@ def register(app, config: dict, authorised, refused, body_of, jobs_start=None) -
             return refused(400, "a name (lowercase, digits, dashes) and start/end dates (YYYY-MM-DD)")
         if not (1 <= count <= 100 and 1 <= picks <= 20 and 0 <= controls <= 20):
             return refused(400, "count 1-100, picks 1-20, controls 0-20")
-        if name in {s.name for s in suites.all_suites(config)}:
-            return refused(400, f"suite {name!r} exists; suites are fixed once built")
+        if suites.exists(config, name):
+            s = next((x for x in suites.all_suites(config) if x.name == name), None)
+            state = f"is being built ({s.done} of {s.total} dates)" if s and s.status == "building" else "exists"
+            return refused(400, f"a suite named {name!r} {state}; choose another name")
         return {"result": start_job(f"agent-lab suite {name}", [
             "agents", "suite-build", name, "--start", start, "--end", end, "--count", str(count),
             "--picks", str(picks), "--controls", str(controls)])}

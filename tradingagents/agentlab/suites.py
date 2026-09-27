@@ -40,6 +40,13 @@ class Suite:
     cases: int                 # names across all screens (picks + controls)
     picks: int
     controls: int
+    status: str = "ready"      # building | ready | failed
+    total: int = 0             # dates asked for (while building)
+    done: int = 0              # dates screened so far
+    error: str = ""
+
+# Measured 2026-09-26: one standard screen over ~5,000 stored histories.
+SECONDS_PER_DATE = 55
 
 
 def _root(config: dict) -> Path:
@@ -61,24 +68,33 @@ def manifests(config: dict, name: str) -> list:
     return [ScreenManifest(**json.loads(p.read_text())) for p in sorted(d.glob("*.json"))]
 
 
-def _write_meta(config: dict, name: str, description: str) -> Suite:
+def _write_meta(config: dict, name: str, description: str, status: str = "ready", total: int = 0,
+                error: str = "") -> Suite:
     ms = manifests(config, name)
     s = Suite(name, description, datetime.now(UTC).isoformat(timespec="seconds"),
               sorted({m.as_of for m in ms}),
               sum(len(m.pick_symbols) + len(m.control_symbols) for m in ms),
               max((len(m.pick_symbols) for m in ms), default=0),
-              max((len(m.control_symbols) for m in ms), default=0))
+              max((len(m.control_symbols) for m in ms), default=0),
+              status=status, total=total or len(ms), done=len(ms), error=error)
     (suite_dir(config, name) / "suite.json").write_text(json.dumps(asdict(s), indent=2))
     return s
+
+
+def exists(config: dict, name: str) -> bool:
+    return suite_dir(config, name).exists()
 
 
 def all_suites(config: dict) -> list[Suite]:
     out = []
     for p in sorted(_root(config).glob("*/suite.json")):
         try:
-            out.append(Suite(**json.loads(p.read_text())))
+            s = Suite(**json.loads(p.read_text()))
         except (TypeError, ValueError):
             continue
+        if s.status == "building":  # progress from the screens saved so far, not the last write
+            s.done = len(list((p.parent / "screens").glob("*.json")))
+        out.append(s)
     return out
 
 
@@ -103,12 +119,20 @@ def build(config: dict, name: str, dates: list[str], picks: int = 8, controls: i
         raise ValueError(f"suite {name!r} exists; suites are fixed once built")
     (d / "screens").mkdir(parents=True)
     cfg = {**config, "results_dir": str(d)}
-    for i, day in enumerate(dates):
-        result = screen("", day, cfg, picks=picks, controls=controls, control_seed=seed + i)
-        if result.manifest.picks:
-            save_manifest(result.manifest, cfg)
-    return _write_meta(config, name, description or f"Standard screen, {len(dates)} dates, "
-                                                    f"{picks} picks + {controls} controls")
+    description = description or f"Standard screen, {len(dates)} dates, {picks} picks + {controls} controls"
+    # Visible from the first moment, with progress, so nobody builds it twice.
+    _write_meta(config, name, description, status="building", total=len(dates))
+    try:
+        for i, day in enumerate(dates):
+            result = screen("", day, cfg, picks=picks, controls=controls, control_seed=seed + i)
+            if result.manifest.picks:
+                save_manifest(result.manifest, cfg)
+            _write_meta(config, name, description, status="building", total=len(dates))
+    except Exception as exc:
+        _write_meta(config, name, description, status="failed", total=len(dates),
+                    error=f"{type(exc).__name__}: {exc}"[:300])
+        raise
+    return _write_meta(config, name, description, total=len(dates))
 
 
 def import_screens(config: dict, name: str, screen_files: list[Path], description: str = "") -> Suite:

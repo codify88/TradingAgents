@@ -82,6 +82,10 @@ export interface Suite {
   cases: number;
   picks: number;
   controls: number;
+  status: "building" | "ready" | "failed";
+  total: number;
+  done: number;
+  error: string;
 }
 
 export interface Estimate {
@@ -130,7 +134,8 @@ export interface RunMetrics {
 
 export const getCatalog = () => get<Catalog>("/api/v1/agents/catalog");
 export const getVariants = () => get<VariantsResponse>("/api/v1/agents/variants");
-export const getSuites = () => get<{ suites: Suite[]; cutoffs: Record<string, string> }>("/api/v1/agents/suites");
+export const getSuites = () =>
+  get<{ suites: Suite[]; cutoffs: Record<string, string>; seconds_per_date: number }>("/api/v1/agents/suites");
 export const getRuns = () => get<{ runs: RunMetrics[] }>("/api/v1/agents/runs");
 export const getJobs = () => get<{ text: string }>("/api/v1/agents/jobs");
 
