@@ -74,7 +74,7 @@ def start(config: dict, kind: str, args: list[str], now: datetime | None = None,
 
 
 def _quote(arg: str) -> str:
-    if not re.fullmatch(r"[A-Za-z0-9_.,:=-]+", arg):
+    if not re.fullmatch(r"\^?[A-Za-z0-9_.,:=-]+", arg):
         raise ValueError(f"refusing an unexpected argument: {arg!r}")
     return arg
 

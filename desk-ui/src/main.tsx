@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Shell } from "./components/Shell";
@@ -20,6 +20,12 @@ const routes = [
   createRoute({ getParentRoute: () => shell, path: "/book", component: BookScreen }),
   createRoute({ getParentRoute: () => shell, path: "/security", component: SecurityScreen }),
   createRoute({ getParentRoute: () => shell, path: "/agents", component: AgentLabScreen }),
+  createRoute({
+    getParentRoute: () => shell,
+    path: "/research",
+    component: lazyRouteComponent(() => import("./screens/Research"), "ResearchScreen"),
+    validateSearch: (q: Record<string, unknown>): { s?: string } => (typeof q.s === "string" && q.s ? { s: q.s } : {}),
+  }),
 ];
 const router = createRouter({
   routeTree: root.addChildren([shell.addChildren(routes)]),

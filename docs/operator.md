@@ -38,7 +38,10 @@ A LaunchAgent (`com.jeremysmith.tradingagents.desk`, kept alive) serves Desk on
 on what needs you: the order plan with its cutoff (hold to approve, then Face
 ID / Touch ID), halts and mismatches, the night, reviews and suggestions. Book
 shows the paper account and cohorts (resume and acknowledge take a passkey;
-halt never does). The v1 page (lab adoption, decisions) is at `/classic`.
+halt never does). Agents is the agent lab. Research takes any company, ETF or
+index: fetch every data tool at once (no model calls), run the agents on it
+outside the book (API credits, estimate confirmed first), or both. The v1 page
+(lab adoption) is at `/classic`.
 
 - Enrol a device: `tradingagents desk code`, then Security -> Create passkey.
 - From the phone: Tailscale, set up once (steps in `docs/design/desk.md`).

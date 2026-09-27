@@ -15,7 +15,9 @@ brooks-bot already serves on 8765.
 | Plan (`/plan/:id`) | Every order and its reason, sessions, equity, carried names, the planner's notes | -- |
 | Book (`/book`) | Halted / blocked / allowed, the account, live cohorts, recent events | Resume, acknowledge (passkey); reconcile |
 | Security (`/security`) | This address's passkeys | Enrol this device with a one-time code |
-| Lab, Research | The v1 page (`/classic#lab`, `/classic#decisions`) until D3 and D4 | as v1 |
+| Agents (`/agents`) | The agent lab (`docs/design/agent-lab.md`) | Variants, suites, runs |
+| Research (`/research?s=SYM`) | Any company, ETF or index: every data tool's output grouped (price and technicals, statements, the latest earnings call, news, insiders / Congress / 13F / ETFs, macro, each mandate's metrics), agent research runs, and the book's own decisions on it | Fetch all data (token; vendor requests only); run the agents with a mandate and models (token and the confirmed estimate); both |
+| Lab | The v1 page (`/classic#lab`) until D3 | as v1 |
 
 Halt is in the header on the phone and at the foot of the sidebar on a desktop,
 on every screen, one tap and a one-line confirm, never a passkey.
@@ -48,6 +50,31 @@ Playwright 1.63. Where it departs from the proposal, and why:
 `npm run e2e` (Playwright on a phone and a desktop viewport, against the real
 API with the fake broker, and Chromium's virtual passkey authenticator: enrol,
 hold-to-approve, halt, resume, a spent enrolment code).
+
+## Research
+
+`desk/research.py` and `desk/research_api.py`. **Fetch** calls every tool the
+agents and the mandates can call for one symbol and date, six at a time, in a
+server thread; it saves `<results_dir>/research/<SYM>/data-<date>.json` as
+sections finish, so the screen fills in live. Each section is `ok`, `empty`
+(the source has nothing), `unavailable` (no key, vendor or data, e.g. FRED
+without `FRED_API_KEY`) or `error`. The ownership and transcript tools are given
+the as-of date explicitly (in the graph they read it from state). An index
+(`^GSPC`, `^DJI`, `^IXIC`, `^RUT`, `^VIX`) skips company-only tools.
+
+**Run** is the full pipeline on one name, with or without a mandate and with any
+priced model, as a background job (`tradingagents research execute`). It builds
+its own graph with its own results dir and memory log and no checkpoint, so it is
+never logged as a decision, never feeds reflection and never trades. Jobs are
+refused in the night window but not by other jobs, since a research run touches
+nothing they write. The cost is one decision at the agent lab's per-decision
+figures (about $0.36 on Haiku, $1.80 on the Opus 4.8 / Sonnet 5 defaults), and
+the start must carry that confirmed estimate. CLI: `tradingagents research fetch
+SYM --date D`, `tradingagents research run SYM --date D --mandate M [--deep X --quick Y]`.
+
+Symbol search reads the stored Alpha Vantage `LISTING_STATUS` (no request).
+Tool output renders as markdown with react-markdown and remark-gfm, which never
+render raw HTML; CSV output becomes a table, newest row first.
 
 ## Passkeys
 
@@ -162,6 +189,6 @@ This page can send orders, so:
    strategy, the paper record against SPY and the style index).
 2. D3: the Lab in the app, adoption with the evidence beside it, and web push
    when a variant clears the bar or a cutoff is missed.
-3. D4: Research (name pages, the decision reader); D5: System and the
-   command palette.
+3. D5: System and the command palette. (D4, Research, is built: see
+   "Research" below.)
 4. Lab runs from Desk as detached jobs (`ops.jobs`); building a plan from Desk.

@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import sys
 import time
@@ -2086,6 +2087,56 @@ def agents_start(
         raise typer.Exit(code=1)
     rid = runs.start_record(DEFAULT_CONFIG, v, suite)
     agents_execute(rid)
+
+
+research_app = typer.Typer(help="Research any symbol: every data tool at once, and agent runs outside the book.")
+app.add_typer(research_app, name="research")
+
+
+@research_app.command(name="fetch")
+def research_fetch(
+    symbol: str = typer.Argument(..., help="A ticker, or ^GSPC-style index."),
+    date: str = typer.Option(None, "--date", help="As-of date (YYYY-MM-DD); today by default."),
+):
+    """Every tool the agents and mandates can call, for one symbol; no model calls."""
+    from tradingagents.desk import research
+
+    day = date or datetime.date.today().isoformat()
+    data = json.loads(research.fetch(DEFAULT_CONFIG, symbol, day).read_text())
+    for s in data["sections"]:
+        console.print(f"{s['status']:<12} {s['title']}  [dim]{s['seconds']}s[/dim]")
+
+
+@research_app.command(name="execute")
+def research_execute(symbol: str = typer.Argument(...), run_id: str = typer.Argument(...)):
+    """Run a research run started from Desk. Model calls are billed to the API key."""
+    from tradingagents.desk import research
+
+    meta = research.execute_run(DEFAULT_CONFIG, symbol, run_id)
+    console.print(f"{run_id}: {meta['status']}" + (f", rated {meta['rating']}" if meta.get("rating") else "")
+                  + (f" ({meta['error']})" if meta.get("error") else ""))
+
+
+@research_app.command(name="run")
+def research_run(
+    symbol: str = typer.Argument(...),
+    date: str = typer.Option(None, "--date"),
+    mandate: str = typer.Option("", "--mandate", help="equity_value, equity_momentum, equity_momentum_leaps, or none."),
+    deep: str = typer.Option(None, "--deep"), quick: str = typer.Option(None, "--quick"),
+    yes: bool = typer.Option(False, "--yes", help="Skip the cost confirmation."),
+):
+    """Estimate, confirm, then run the agents on one symbol in the foreground (outside the book)."""
+    from tradingagents.desk import research
+
+    models = {k: v for k, v in (("deep", deep), ("quick", quick)) if v}
+    est = research.estimate(DEFAULT_CONFIG, models)
+    if est["cost_high"] is not None:
+        console.print(f"One decision with {', '.join(est['models'])}: about ${est['cost_high']:.2f}, ~{est['minutes']} min.")
+    if not yes and not typer.confirm("Spend that on API credits?"):
+        raise typer.Exit(code=1)
+    day = date or datetime.date.today().isoformat()
+    rid = research.start_run(DEFAULT_CONFIG, symbol, day, "" if mandate == "none" else mandate, models)
+    research_execute(symbol, rid)
 
 
 trade_app = typer.Typer(help="Paper execution for the standard strategy: plans, approval, halt, reconcile.")

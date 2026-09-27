@@ -75,18 +75,25 @@ export function Dialog({
   title,
   description,
   children,
+  wide,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
   children: ReactNode;
+  wide?: boolean;
 }) {
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
       <D.Portal>
         <D.Overlay className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" />
-        <D.Content className="fixed inset-x-3 bottom-3 z-50 rounded-2xl border border-rule bg-surface p-5 shadow-xl outline-none pb-[max(20px,env(safe-area-inset-bottom))] sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/3 sm:w-[440px] sm:-translate-x-1/2">
+        <D.Content
+          className={cn(
+            "fixed inset-x-3 bottom-3 z-50 rounded-2xl border border-rule bg-surface p-5 shadow-xl outline-none pb-[max(20px,env(safe-area-inset-bottom))] sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:-translate-x-1/2",
+            wide ? "top-3 sm:top-[5vh] sm:w-[min(900px,92vw)]" : "sm:top-1/3 sm:w-[440px]",
+          )}
+        >
           <div className="flex items-start justify-between gap-4">
             <D.Title className="text-lg font-bold tracking-tight">{title}</D.Title>
             <D.Close className="rounded-lg p-1 text-muted hover:bg-sunk" aria-label="Close">

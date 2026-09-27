@@ -9,13 +9,13 @@ import { Button, Dialog, Pill } from "./ui";
 
 type NavItem = { to: string; label: string; icon: ReactNode; external?: boolean; desktopOnly?: boolean };
 
-// Lab and Research open the v1 page until their screens land (D3, D4).
+// Lab opens the v1 page until its screen lands (D3).
 const NAV: NavItem[] = [
   { to: "/", label: "Today", icon: <LayoutList size={18} /> },
   { to: "/book", label: "Book", icon: <BookOpen size={18} /> },
   { to: "/agents", label: "Agents", icon: <Bot size={18} /> },
   { to: "/classic#lab", label: "Lab", icon: <FlaskConical size={18} />, external: true },
-  { to: "/classic#decisions", label: "Research", icon: <ScrollText size={18} />, external: true, desktopOnly: true },
+  { to: "/research", label: "Research", icon: <ScrollText size={18} /> },
   { to: "/security", label: "Security", icon: <KeyRound size={18} /> },
 ];
 
@@ -116,7 +116,7 @@ function HaltControl({ wide }: { wide?: boolean }) {
 
 export function Shell() {
   const today = useToday();
-  const wide = useRouterState({ select: (st) => st.location.pathname.startsWith("/agents") });
+  const wide = useRouterState({ select: (st) => /^\/(agents|research)/.test(st.location.pathname) });
   const needs = today.data?.needs_you ?? 0;
   return (
     <div className="flex h-full">

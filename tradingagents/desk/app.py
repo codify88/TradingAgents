@@ -182,6 +182,10 @@ def create_app(config: dict, token: str | None = None, broker_factory=None,
 
     register_agent_lab(app, config, authorised, refused, body_of)
 
+    from .research_api import register as register_research
+
+    register_research(app, config, authorised, refused, body_of)
+
     # --- the v1 page's API (/api), unchanged but for the money actions ------------
 
     @app.get("/api/overview")

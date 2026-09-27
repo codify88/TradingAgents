@@ -107,3 +107,21 @@ body {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* Tool output and agent reports (react-markdown; no raw HTML is rendered). */
+.md > * + * { margin-top: 0.6em; }
+.md h1, .md h2, .md h3, .md h4 { font-weight: 650; letter-spacing: -0.01em; margin-top: 1em; }
+.md h1 { font-size: 1.25em; }
+.md h2 { font-size: 1.12em; }
+.md h3, .md h4 { font-size: 1em; }
+.md ul { list-style: disc; padding-left: 1.3em; }
+.md ol { list-style: decimal; padding-left: 1.3em; }
+.md a { color: var(--accent); text-decoration: underline; }
+.md code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; background: var(--sunk); padding: 0.05em 0.3em; border-radius: 4px; }
+.md pre { background: var(--sunk); padding: 0.7em; border-radius: 8px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md blockquote { border-left: 3px solid var(--rule); padding-left: 0.8em; color: var(--muted); }
+.md table { display: block; overflow-x: auto; border-collapse: collapse; font-size: 0.92em; font-variant-numeric: tabular-nums; }
+.md th, .md td { border-bottom: 1px solid var(--rule); padding: 0.3em 0.7em 0.3em 0; text-align: left; white-space: nowrap; }
+.md th { font-weight: 600; color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--rule); }
