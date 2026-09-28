@@ -53,6 +53,20 @@ fi
 
 cd "$REPO" || { echo "FATAL: cannot enter $REPO"; exit 1; }
 
+# One single-token model call before anything spends: an empty credit balance
+# or a refused key would otherwise fail every name, one by one, with nothing
+# said until the log is read (2026-09-28). Those two skip the model steps; the
+# free steps -- screens, market state, reconcile, the plan -- still run.
+echo "--- llm check [$(date +%H:%M:%S)] ---"
+"$TRADINGAGENTS" llm-check < /dev/null
+LLM=$?
+MODELS_OK=1
+if [ "$LLM" -eq 3 ] || [ "$LLM" -eq 4 ]; then
+    MODELS_OK=0
+    echo "model steps skipped tonight: see the LLM check above."
+fi
+echo
+
 echo "--- step 1: screen (no model calls) [$(date +%H:%M:%S)] ---"
 if ! "$TRADINGAGENTS" screen --mandate "$MANDATE" --picks "$PICKS" \
         --controls "$CONTROLS" --budget "$BUDGET" < /dev/null; then
@@ -66,9 +80,14 @@ echo
 # job called "the value job" would quietly spend its budget on momentum names.
 # The queue splits the names between the screen backlog and active trials
 # (decision 5: 5 names, 2 backlog, 3 trials; unused slots go to the other side).
-echo "--- step 2: adjudicate at most $MAX_NAMES $MANDATE names [$(date +%H:%M:%S)] ---"
-"$TRADINGAGENTS" nightly-queue --mandate "$MANDATE" --max-names "$MAX_NAMES" --backlog "$BACKLOG" < /dev/null
-STATUS=$?
+if [ "$MODELS_OK" -eq 1 ]; then
+    echo "--- step 2: adjudicate at most $MAX_NAMES $MANDATE names [$(date +%H:%M:%S)] ---"
+    "$TRADINGAGENTS" nightly-queue --mandate "$MANDATE" --max-names "$MAX_NAMES" --backlog "$BACKLOG" < /dev/null
+    STATUS=$?
+else
+    echo "--- step 2: skipped: the models can't be called (LLM check) ---"
+    STATUS=$LLM
+fi
 
 echo
 echo "--- summary [$(date +%H:%M:%S)] ---"
@@ -100,7 +119,9 @@ if [ "$STANDARD_NAMES" -gt 0 ]; then
     # Only today's screen, and only when today has an open to trade it at: a
     # 5-day pick is tradeable only the morning after it is screened, and a
     # weekend or holiday night's picks never reach an open.
-    if "$TRADINGAGENTS" trade session-today < /dev/null; then
+    if [ "$MODELS_OK" -eq 0 ]; then
+        echo "--- step 4: skipped: the models can't be called (LLM check) ---"
+    elif "$TRADINGAGENTS" trade session-today < /dev/null; then
         echo "--- step 4: adjudicate at most $STANDARD_NAMES standard names [$(date +%H:%M:%S)] ---"
         "$TRADINGAGENTS" nightly-queue --mandate none --max-names "$STANDARD_NAMES" \
             --backlog "$STANDARD_NAMES" --fresh < /dev/null || true

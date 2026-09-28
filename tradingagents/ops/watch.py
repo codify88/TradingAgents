@@ -122,3 +122,13 @@ def ownership(today: str | None = None) -> str:
                              f"{e.get('shares')} on {e['as_of']}")
     return ("Insider and congressional trades made public in the last day, in names with an "
             "open decision\n\n" + "\n".join(lines)) if lines else ""
+
+
+def credits() -> str:
+    """Silent when the models answer; otherwise why not, in time to fix it before 02:00."""
+    from tradingagents.ops.credits import check
+
+    c = check()
+    if c.status in ("ok", "skipped"):
+        return ""
+    return f"Tonight's run can't call the models.\n\n{c.line()}"

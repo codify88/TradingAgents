@@ -2314,17 +2314,28 @@ def learn_lessons(mandate: str = typer.Option(..., "--mandate")):
                   f"{len({x.ticker for x in lessons})} names.")
 
 
+@app.command(name="llm-check")
+def llm_check():
+    """One single-token model call: exit 0 if the API answers, 3 out of credits, 4 key refused,
+    5 unreachable, 6 other. The nightly script skips its model steps on 3 or 4."""
+    from tradingagents.ops.credits import EXIT, check
+
+    c = check()
+    print(c.line())
+    raise typer.Exit(code=EXIT[c.status])
+
+
 @app.command(name="watch")
 def watch_command(
-    name: str = typer.Argument(..., help="reviews | edge | earnings | ownership"),
+    name: str = typer.Argument(..., help="reviews | edge | earnings | ownership | credits"),
 ):
     """Print a watcher's message, or nothing when there is nothing to say (for Hermes jobs)."""
     from tradingagents.ops import watch
 
     fn = {"reviews": watch.reviews, "edge": watch.edge, "earnings": watch.earnings,
-          "ownership": watch.ownership}.get(name)
+          "ownership": watch.ownership, "credits": watch.credits}.get(name)
     if fn is None:
-        console.print("[red]Watchers: reviews, edge, earnings, ownership[/red]")
+        console.print("[red]Watchers: reviews, edge, earnings, ownership, credits[/red]")
         raise typer.Exit(code=1)
     text = fn()
     if text:

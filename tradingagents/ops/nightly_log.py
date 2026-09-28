@@ -45,6 +45,7 @@ class NightlyRun:
     names_run: int = 0
     failures: list[tuple[str, str, str]] = field(default_factory=list)   # ticker, date, reason
     usage_lines: list[str] = field(default_factory=list)
+    llm_failed: str = ""                      # the "LLM check: FAILED" line, or out-of-credits seen in a cell
     store_line: str = ""
     served_line: str = ""
 
@@ -72,6 +73,8 @@ class NightlyRun:
 
     def problems(self) -> list[str]:
         out = []
+        if self.llm_failed:
+            out.append(self.llm_failed)
         if self.finished is None:
             out.append("did not finish (still running, or stopped before the end)")
         if self.screen_failed:
@@ -154,6 +157,10 @@ def parse(path: str | Path, scheduled: str | None = "02:00") -> NightlyRun:
             if key not in failed_seen:
                 failed_seen.add(key)
                 run.failures.append((mm.group(1), mm.group(2), mm.group(3)))
+                if not run.llm_failed and "credit balance is too low" in mm.group(3):
+                    run.llm_failed = "the Anthropic credit balance ran out during the run; top up and re-run"
+        elif line.startswith("LLM check: FAILED"):
+            run.llm_failed = line.removeprefix("LLM check: FAILED -- ")
         elif line.startswith("Model usage:"):
             run.usage_lines.append(line)
         elif line.startswith("--- data store ---"):

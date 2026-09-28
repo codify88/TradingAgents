@@ -261,7 +261,12 @@ def run_backtest(
         for e in graph.memory_log.load_entries()
     }
 
+    from tradingagents.ops.credits import is_out_of_credits
+
+    out_of_credits = False
     for ticker in tickers:
+        if out_of_credits:
+            break
         for date in dates:
             if (ticker, date, graph.mandate_name) in done:
                 result.skipped += 1
@@ -275,10 +280,18 @@ def run_backtest(
                 logger.warning("Backtest cell %s %s failed: %s", ticker, date, exc)
                 result.failures.append((ticker, date, str(exc)))
                 record("cell", ticker, date, "failed", before, started)
+                # Every later call would be refused the same way: stop, and leave the
+                # rest untried so the next run (after a top-up) picks them up.
+                if is_out_of_credits(exc):
+                    out_of_credits = True
+                    logger.warning("Stopped: the Anthropic credit balance is too low; the remaining "
+                                   "cells were not tried.")
+                    print("Stopped: the Anthropic credit balance is too low; remaining names left for the next run.")
+                    break
 
     # Settlement runs at the start of the next run for a ticker, so each ticker's
-    # last cell would stay pending without this pass.
-    for ticker in tickers:
+    # last cell would stay pending without this pass. (Not without credits: it calls a model.)
+    for ticker in ([] if out_of_credits else tickers):
         before, started = tracker.snapshot(), time.monotonic()
         try:
             graph.settle_pending(ticker)

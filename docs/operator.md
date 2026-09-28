@@ -12,7 +12,7 @@ so it can be rebuilt or checked. Set up 2026-09-25.
 | Operator profile | `~/.hermes/profiles/tradeops` | Claude Haiku 4.5 via the Anthropic API; the only toolset on CLI and Telegram is `mcp-trade-agents`. Every built-in toolset -- terminal, file, browser, web, memory, cron -- is off. |
 | Host gateway | LaunchAgent `com.jeremysmith.tradingagents.hermes` (`hermes gateway run --external-supervisor`, KeepAlive) | Hermes runs one gateway per machine; it serves every profile's platforms. Only `tradeops` has one (Telegram); the default profile has none, so nothing inbound reaches it. |
 | Morning report | Hermes cron job `morning-report`, `0 8 * * *`, in `tradeops` | Runs `scripts/morning-report.sh` -> `tradingagents morning-report` and posts the output verbatim to the channel (`--no-agent`). No model writes it, so it cannot misreport. |
-| Watchers | Hermes cron jobs `watch-earnings` (08:05 daily), `watch-ownership` (08:10 daily), `watch-reviews` (08:05 Mondays), `watch-edge` (08:10 Mondays) | Each runs `tradingagents watch <name>` (`--no-agent`) and is silent when there is nothing to say. |
+| Watchers | Hermes cron jobs `watch-earnings` (08:05 daily), `watch-ownership` (08:10 daily), `watch-reviews` (08:05 Mondays), `watch-edge` (08:10 Mondays), `watch-credits` (20:00 daily: one single-token model call, so an empty Anthropic balance or a refused key is known before 02:00) | Each runs `tradingagents watch <name>` (`--no-agent`) and is silent when there is nothing to say. |
 | Approval | `trust: untrusted` on the `trade-agents` server in the profile's `config.yaml` | Hermes asks before every call of a tool not annotated read-only (the four actions). Without it, missing trust means full and nothing is asked. Checked: a one-shot request to start a screen run was stopped at the approval prompt and denied. |
 | Wake | the platform wake daemon (07:55) and the stay-awake agent (`com.jeremysmith.tradingagents.awake`, caffeinate 20 min from 01:56 and 07:56) | A scheduled wake alone may drop back to sleep within minutes; the stay-awake agent keeps the Mac up for the 02:00 run and the 08:00-08:10 jobs. |
 
@@ -48,6 +48,16 @@ outside the book (API credits, estimate confirmed first), or both. The v1 page
 - After changing the app: `cd desk-ui && npm run build`; the agent serves
   `desk-ui/dist` directly, no restart needed.
 - Logs: `~/.tradingagents/logs/desk.out` and `desk.err`.
+
+## When the models can't be called
+
+The nightly job starts with `tradingagents llm-check` (one single-token call to
+the quick model). Out of credits (exit 3) or a refused key (exit 4) skips the
+model steps; the screens, market state, reconcile and plan still run, and Desk
+and the morning report name the cause. A balance that runs out mid-run stops the
+sweep at the first refusal and leaves the rest for the next run. After a top-up,
+nothing needs re-running by hand: failed names are retried the next night, or
+start them now from Desk or with `tradingagents nightly-queue`.
 
 ## Secrets
 
