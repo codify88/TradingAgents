@@ -71,6 +71,10 @@ class AnthropicClient(BaseLLMClient):
                 continue
             llm_kwargs[key] = self.kwargs[key]
 
+        if self.kwargs.get("prompt_cache"):  # trade-agents: cache the analysts' tool loops
+            from .prompt_cache import CachingChatAnthropic
+
+            return CachingChatAnthropic(**llm_kwargs)
         return NormalizedChatAnthropic(**llm_kwargs)
 
     def validate_model(self) -> bool:

@@ -42,6 +42,14 @@ class Usage:
         return asdict(self)
 
 
+def cache_written(details: dict) -> int:
+    """Cache-write tokens. langchain-anthropic reports them per lifetime
+    (``ephemeral_5m_input_tokens`` / ``ephemeral_1h_input_tokens``) and then
+    zeroes the generic ``cache_creation``, so read the lifetimes first."""
+    by_ttl = sum(int(details.get(k) or 0) for k in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"))
+    return by_ttl or int(details.get("cache_creation") or 0)
+
+
 class UsageTracker(BaseCallbackHandler):
     """Cumulative usage across every model call made through the clients it is bound to."""
 
@@ -63,7 +71,7 @@ class UsageTracker(BaseCallbackHandler):
                     tokens_in=int(meta.get("input_tokens") or 0),
                     tokens_out=int(meta.get("output_tokens") or 0),
                     cache_read=int(details.get("cache_read") or 0),
-                    cache_write=int(details.get("cache_creation") or 0),
+                    cache_write=cache_written(details),
                 )
         with self._lock:
             self._total = self._total + found + Usage(llm_calls=1)

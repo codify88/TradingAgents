@@ -52,12 +52,22 @@ def price(model: str) -> tuple[float, float] | None:
     return next((p for k, p in sorted(PRICES.items(), key=lambda kv: -len(kv[0])) if model.startswith(k)), None)
 
 
-def cost_range(tokens_in: int, tokens_out: int, models: list[str]) -> tuple[float, float] | None:
-    """(low, high) cost; exact when every agent used one model."""
+CACHE_READ, CACHE_WRITE = 0.1, 1.25   # Anthropic's multipliers on the input price (5-minute cache)
+
+
+def cost_range(tokens_in: int, tokens_out: int, models: list[str],
+               cache_read: int = 0, cache_write: int = 0) -> tuple[float, float] | None:
+    """(low, high) cost; exact when every agent used one model.
+
+    ``tokens_in`` includes the cached tokens (langchain's input total does), so
+    they are taken out of the full-price part and priced at their own rates.
+    """
     ps = [price(m) for m in models]
     if not ps or any(p is None for p in ps):
         return None
-    costs = [(tokens_in * pi + tokens_out * po) / 1e6 for pi, po in ps]
+    full = tokens_in - cache_read - cache_write
+    billed_in = full + cache_read * CACHE_READ + cache_write * CACHE_WRITE
+    costs = [(billed_in * pi + tokens_out * po) / 1e6 for pi, po in ps]
     return (min(costs), max(costs))
 
 
@@ -175,7 +185,8 @@ def metrics(config: dict, run_id: str) -> dict:
     ti, to = sum(u.get("tokens_in", 0) for u in cells), sum(u.get("tokens_out", 0) for u in cells)
     rcfg = {**config, **Variant(**{k: v for k, v in variant.items() if k in ("name", "models", "settings")}).config_overrides()}
     models = sorted({rcfg.get("deep_think_llm", ""), rcfg.get("quick_think_llm", "")})
-    rng = cost_range(ti, to, models)
+    cr, cw = sum(u.get("cache_read", 0) or 0 for u in cells), sum(u.get("cache_write", 0) or 0 for u in cells)
+    rng = cost_range(ti, to, models, cr, cw)
     pick_a = [a for (t, _), a in alpha.items() if t in picks]
     ctrl_a = [a for (t, _), a in alpha.items() if t not in picks]
     return {
@@ -188,7 +199,7 @@ def metrics(config: dict, run_id: str) -> dict:
         "agents_t": _t(bull, rest), "bullish_n": len(bull),
         "hit_rate": sum(hits) / len(hits) if hits else math.nan, "calls": len(hits),
         "picks_vs_controls": _mean(pick_a) - _mean(ctrl_a) if pick_a and ctrl_a else math.nan,
-        "tokens_in": ti, "tokens_out": to, "llm_calls": sum(u.get("llm_calls", 0) for u in cells),
+        "tokens_in": ti, "tokens_out": to, "cache_read": cr, "cache_write": cw, "llm_calls": sum(u.get("llm_calls", 0) for u in cells),
         "cost_low": rng[0] if rng else None, "cost_high": rng[1] if rng else None,
         "per_decision": (rng[0] / len(cells)) if rng and cells else None,
         "edits": meta.get("edits", {}), "failures": len(meta.get("failures", [])), "models": models,

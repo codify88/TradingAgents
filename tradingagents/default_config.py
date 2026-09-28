@@ -130,6 +130,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Internal agent debate stays in English for reasoning quality
     "output_language": "English",
     # Debate and discussion settings
+    # Anthropic prompt caching on the analysts' tool loops (llm_clients/prompt_cache.py).
+    "anthropic_prompt_cache": True,
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
