@@ -61,3 +61,15 @@ changes.
    into production needs the same hook applied to the nightly run, behind an
    explicit adoption like the screen lab's.
 3. Prompt caching (0 cache reads today) to cut the input cost of every run.
+
+
+## Knobs and replays (the rating habit)
+
+`agentlab/knobs.py` names the changes aimed at the agents' reluctance to rate Buy (the rating
+scale's meaning, the flat book, a stated probability, a base rate, the Conservative voice, the
+holding framing, risk rounds); `compose` turns one option per knob into an ordinary variant.
+`agentlab/replay.py` re-runs only the last stages of saved decisions (`full_states_log_*.json`
+under `results_dir/backtest`) under a variant -- the PM alone, the risk debate on, the trader on,
+or the research debate on -- and scores each case on one horizon from the price panel. A case
+costs cents instead of dollars. Desk: Agents -> Playbook / Knobs / Replays;
+`docs/design/rating-playbook.md` is the order to work in.

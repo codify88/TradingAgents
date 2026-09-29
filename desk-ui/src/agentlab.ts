@@ -47,6 +47,7 @@ export interface Variant {
   settings: Record<string, number | boolean>;
   vendors: Record<string, string>;
   extra_tools: Record<string, string[]>;
+  knobs?: Record<string, string>;
   version: number;
   saved: string;
 }
@@ -149,6 +150,113 @@ export const startRun = (variant: string, suite: string, confirm_cost: number, o
 export const buildSuite = (body: { name: string; start: string; end: string; count: number; picks: number; controls: number }) =>
   post<{ result: string }>("/api/v1/agents/suites", body);
 
+// --- knobs and replays (agentlab/knobs.py, agentlab/replay.py) -----------------------
+
+export interface KnobOption {
+  key: string;
+  label: string;
+  detail: string;
+  agents: string[];
+  settings: Record<string, number | boolean>;
+}
+
+export interface Knob {
+  key: string;
+  label: string;
+  question: string;
+  options: KnobOption[];
+}
+
+export interface ReplayCases {
+  total: number;
+  by_mandate: Record<string, Record<string, number>>;
+  stages: Record<string, string>;
+  max: number;
+}
+
+export interface ReplayRequest {
+  variant: string;
+  stage: string;
+  mandate: string;
+  count: number;
+  seed: number;
+  horizon: number;
+  case_ids?: string[];
+}
+
+export interface ReplayEstimate {
+  stage: string;
+  cases: number;
+  models: string[];
+  cost: number | null;
+  minutes: number;
+  max_cost: number;
+}
+
+export interface Edge {
+  scored: number;
+  bullish_n: number;
+  edge: number | null;
+  t: number | null;
+  hit_rate: number | null;
+  calls: number;
+}
+
+export interface ReplayMetrics {
+  id: string;
+  variant: string;
+  version: number;
+  knobs: Record<string, string>;
+  stage: string;
+  horizon: number;
+  status: string;
+  started: string;
+  finished: string | null;
+  cases: number;
+  done: number;
+  failed: number;
+  errors: string[];
+  ratings: Record<string, number>;
+  original_ratings: Record<string, number>;
+  moves: Record<string, Record<string, number>>;
+  bullish_share: number | null;
+  hold_share: number | null;
+  new: Edge;
+  original: Edge;
+  probability: { n: number; brier: number | null; mean: number | null } | null;
+  cost: number | null;
+  per_case: number | null;
+  models: string[];
+  case_ids: string[];
+}
+
+export interface ReplayDecision {
+  case: string;
+  ticker: string;
+  date: string;
+  mandate: string;
+  original: string;
+  rating: string | null;
+  research: string | null;
+  probability: number | null;
+  status: string;
+  error: string | null;
+  decision: string | null;
+  alpha: number | null;
+}
+
+export const getKnobs = () => get<{ knobs: Knob[]; production: Record<string, string> }>("/api/v1/agents/knobs");
+export const saveKnobVariant = (body: { name: string; choices: Record<string, string>; description?: string; models?: { deep?: string; quick?: string } }) =>
+  post<Variant>("/api/v1/agents/knobs", body);
+export const getReplayCases = () => get<ReplayCases>("/api/v1/agents/replay/cases");
+export const estimateReplay = (r: ReplayRequest) => post<ReplayEstimate>("/api/v1/agents/replay/estimate", r);
+export const startReplay = (r: ReplayRequest & { confirm_cost: number; over_cap?: boolean }) =>
+  post<{ replay: string; result: string }>("/api/v1/agents/replays", r);
+export const getReplays = () => get<{ replays: ReplayMetrics[] }>("/api/v1/agents/replays");
+export const getReplayDecisions = (id: string) =>
+  get<{ decisions: ReplayDecision[] }>(`/api/v1/agents/replays/${encodeURIComponent(id)}/decisions`);
+export const getPlaybook = () => get<{ text: string }>("/api/v1/agents/playbook");
+
 export const blankVariant = (): Variant => ({
   name: "",
   description: "",
@@ -157,6 +265,7 @@ export const blankVariant = (): Variant => ({
   settings: {},
   vendors: {},
   extra_tools: {},
+  knobs: {},
   version: 0,
   saved: "",
 });

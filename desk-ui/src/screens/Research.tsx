@@ -2,9 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronRight, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { cn } from "../cn";
+import { Markdownish } from "../components/Md";
 import { useToast } from "../components/toast";
 import { Button, Card, Dialog, Empty, ErrorNote, Label, Pill } from "../components/ui";
 import {
@@ -91,11 +90,7 @@ function Csv({ t }: { t: NonNullable<ReturnType<typeof csvOf>> }) {
 export function Md({ text }: { text: string }) {
   const csv = csvOf(text);
   if (csv) return <Csv t={csv} />;
-  return (
-    <div className="md text-[13.5px] leading-relaxed">
-      <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
-    </div>
-  );
+  return <Markdownish text={text} />;
 }
 
 // --- symbol search ---------------------------------------------------------------

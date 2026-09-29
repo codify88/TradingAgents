@@ -2069,6 +2069,17 @@ def agents_execute(run_id: str = typer.Argument(..., help="A run started from De
                   f"failed; ratings {m['ratings']}; cost ${m['cost_low'] or 0:.2f}.")
 
 
+@agents_app.command(name="replay-execute")
+def agents_replay_execute(replay_id: str = typer.Argument(..., help="A replay started from Desk.")):
+    """Run (or resume) a replay: the last stages of saved decisions under a variant. Billed to the API key."""
+    from tradingagents.agentlab import replay
+
+    replay.execute(DEFAULT_CONFIG, replay_id)
+    m = replay.metrics(DEFAULT_CONFIG, replay_id)
+    console.print(f"Replay {replay_id}: {m['done']} done, {m['failed']} failed; ratings {m['ratings']}; "
+                  f"cost ${m['cost'] or 0:.2f}.")
+
+
 @agents_app.command(name="start")
 def agents_start(
     variant: str = typer.Argument(...), suite: str = typer.Argument(...),

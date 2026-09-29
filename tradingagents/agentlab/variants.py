@@ -50,6 +50,7 @@ class Variant:
     settings: dict = field(default_factory=dict)
     vendors: dict[str, str] = field(default_factory=dict)
     extra_tools: dict[str, list[str]] = field(default_factory=dict)
+    knobs: dict[str, str] = field(default_factory=dict)       # knob -> option, when built from knobs.py
     version: int = 0
     saved: str = ""
 

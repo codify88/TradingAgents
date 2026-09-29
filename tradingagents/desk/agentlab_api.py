@@ -33,12 +33,23 @@ def _clean(x):
 def register(app, config: dict, authorised, refused, body_of, jobs_start=None) -> None:
     from dataclasses import asdict
 
-    from tradingagents.agentlab import catalog as cat, hook, runs, suites, variants as va
+    from tradingagents.agentlab import (
+        catalog as cat,
+        hook,
+        knobs,
+        replay,
+        runs,
+        suites,
+        variants as va,
+    )
 
-    def start_job(kind: str, args: list[str]) -> str:
+    def start_job(kind: str, args: list[str], exclusive: bool = True) -> str:
         from tradingagents.ops import jobs
 
-        return (jobs_start or jobs.start)(config, kind, args)
+        if jobs_start:
+            return jobs_start(config, kind, args)
+        # Replays write only their own directory, so other jobs don't block them.
+        return jobs.start(config, kind, args) if exclusive else jobs.start(config, kind, args, busy=lambda: None)
 
     @app.get("/api/v1/agents/catalog")
     def agents_catalog():
@@ -61,7 +72,7 @@ def register(app, config: dict, authorised, refused, body_of, jobs_start=None) -
         b = await body_of(request)
         try:
             v = va.from_json({k: b.get(k) for k in ("name", "description", "edits", "models", "settings",
-                                                    "vendors", "extra_tools") if b.get(k) is not None})
+                                                    "vendors", "extra_tools", "knobs") if b.get(k) is not None})
             known_tools = set(cat.all_tools())
             from tradingagents.dataflows.interface import VENDOR_LIST
 
@@ -175,3 +186,101 @@ def register(app, config: dict, authorised, refused, body_of, jobs_start=None) -
         from tradingagents.ops import jobs
 
         return {"text": jobs.status(config, limit=8)}
+
+    # --- knobs --------------------------------------------------------------------
+
+    @app.get("/api/v1/agents/knobs")
+    def agents_knobs():
+        return {"knobs": knobs.catalog(), "production": knobs.PRODUCTION}
+
+    @app.post("/api/v1/agents/knobs")
+    async def agents_knobs_save(request: Request):
+        """Compose a variant from knob choices and save it."""
+        if not authorised(request):
+            return refused(403, "not authorised")
+        b = await body_of(request)
+        try:
+            v = knobs.compose(str(b.get("name", "")), dict(b.get("choices") or {}),
+                              str(b.get("description") or ""), dict(b.get("models") or {}))
+            saved = va.save(config, v)
+        except (ValueError, TypeError) as exc:
+            return refused(400, str(exc))
+        return asdict(saved)
+
+    # --- replays ------------------------------------------------------------------
+
+    def replay_request(b: dict):
+        v = va.load(config, str(b.get("variant", "")))
+        stage = str(b.get("stage", "pm"))
+        try:
+            count, seed, horizon = int(b.get("count", 40)), int(b.get("seed", 7)), int(b.get("horizon", 5))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("count, seed and horizon are whole numbers") from exc
+        if not (1 <= count <= replay.MAX_CASES and 1 <= horizon <= 63):
+            raise ValueError(f"count 1-{replay.MAX_CASES}, horizon 1-63 sessions")
+        ids = b.get("case_ids") or None
+        cases = replay.choose(config, str(b.get("mandate", "any")), count, seed, ids=ids)
+        if not cases:
+            raise ValueError("no saved decisions match")
+        return v, stage, cases, horizon
+
+    @app.get("/api/v1/agents/replay/cases")
+    def agents_replay_cases():
+        return {**replay.case_sets(config), "stages": replay.STAGE_LABELS, "max": replay.MAX_CASES}
+
+    @app.post("/api/v1/agents/replay/estimate")
+    async def agents_replay_estimate(request: Request):
+        try:
+            v, stage, cases, _ = replay_request(await body_of(request))
+            return {**replay.estimate(config, v, stage, len(cases)),
+                    "max_cost": float(config.get("agentlab_max_cost", DEFAULT_MAX_COST))}
+        except ValueError as exc:
+            return refused(400, str(exc))
+
+    @app.post("/api/v1/agents/replays")
+    async def agents_replay_start(request: Request):
+        if not authorised(request):
+            return refused(403, "not authorised")
+        b = await body_of(request)
+        try:
+            v, stage, cases, horizon = replay_request(b)
+            est = replay.estimate(config, v, stage, len(cases))
+        except ValueError as exc:
+            return refused(400, str(exc))
+        if est["cost"] is None:
+            return refused(400, "no price known for these models; the replay cannot be estimated")
+        confirmed = b.get("confirm_cost")
+        if not isinstance(confirmed, (int, float)) or confirmed + 0.01 < est["cost"]:
+            return refused(400, f"confirm the estimate first (up to ${est['cost']:.2f})")
+        cap = float(config.get("agentlab_max_cost", DEFAULT_MAX_COST))
+        if est["cost"] > cap and b.get("over_cap") is not True:
+            return refused(400, f"about ${est['cost']:.0f} is over the ${cap:.0f} cap; confirm going over it explicitly")
+        rid = replay.start(config, v, stage, cases, horizon)
+        result = start_job(f"agent-lab replay {rid}", ["agents", "replay-execute", rid], exclusive=False)
+        return {"replay": rid, "result": result}
+
+    @app.get("/api/v1/agents/replays")
+    def agents_replays():
+        from tradingagents.lab.panel import load_panel
+
+        panel = load_panel(config)
+        out = []
+        for rid in replay.all_replays(config)[:60]:
+            try:
+                out.append(_clean(replay.metrics(config, rid, panel=panel)))
+            except (OSError, ValueError, KeyError):
+                continue
+        return {"replays": out}
+
+    @app.get("/api/v1/agents/replays/{rid}/decisions")
+    def agents_replay_decisions(rid: str):
+        if rid not in replay.all_replays(config):
+            return JSONResponse({"error": "no such replay"}, status_code=404)
+        return {"decisions": _clean(replay.decisions(config, rid))}
+
+    @app.get("/api/v1/agents/playbook")
+    def agents_playbook():
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "docs" / "design" / "rating-playbook.md"
+        return {"text": path.read_text() if path.exists() else "The playbook is missing from docs/design."}

@@ -1,11 +1,18 @@
-import { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { cn } from "../../cn";
 import { AgentsTab } from "./AgentsTab";
+import { KnobsTab } from "./KnobsTab";
+import { ReplaysTab } from "./ReplaysTab";
 import { RunsTab } from "./RunsTab";
 import { SuitesTab } from "./SuitesTab";
 import { VariantsTab } from "./VariantsTab";
 
+const PlaybookTab = lazy(() => import("./PlaybookTab").then((m) => ({ default: m.PlaybookTab })));
+
 const TABS = [
+  { key: "playbook", label: "Playbook", blurb: "How to fix the Hold habit, step by step" },
+  { key: "knobs", label: "Knobs", blurb: "One change at a time, saved as a variant" },
+  { key: "replays", label: "Replays", blurb: "The last stages of saved decisions, re-run" },
   { key: "agents", label: "Agents", blurb: "What each agent reads, calls, and was sent" },
   { key: "variants", label: "Variants", blurb: "Named prompt edits, models, data and tools" },
   { key: "runs", label: "Runs", blurb: "A variant on a suite, and what it measured" },
@@ -22,6 +29,13 @@ export function AgentLabScreen() {
   const [tab, setTab] = useState<Tab>(initialTab);
   // A variant chosen elsewhere (e.g. "Edit in a variant" on an agent) opens here.
   const [focus, setFocus] = useState<{ agent?: string; variant?: string }>({});
+
+  // A link to #knobs, #replays... opens that tab, even from this page.
+  useEffect(() => {
+    const onHash = () => setTab(initialTab());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   const go = (t: Tab, f: { agent?: string; variant?: string } = {}) => {
     setFocus(f);
@@ -56,6 +70,13 @@ export function AgentLabScreen() {
           </button>
         ))}
       </div>
+      {tab === "playbook" ? (
+        <Suspense fallback={<p className="text-faint">Loading…</p>}>
+          <PlaybookTab />
+        </Suspense>
+      ) : null}
+      {tab === "knobs" ? <KnobsTab onReplay={(variant) => go("replays", { variant })} /> : null}
+      {tab === "replays" ? <ReplaysTab key={focus.variant ?? ""} focus={focus} /> : null}
       {tab === "agents" ? <AgentsTab onEdit={(agent) => go("variants", { agent })} /> : null}
       {tab === "variants" ? <VariantsTab focus={focus} onRun={(variant) => go("runs", { variant })} /> : null}
       {tab === "runs" ? <RunsTab focus={focus} /> : null}
